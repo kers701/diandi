@@ -1,5 +1,6 @@
 package com.diandi.bookkeeping.ui.screens
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -8,22 +9,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.viewmodel.MainViewModel
-import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
-import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
-import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
-import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
-import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
-import com.patrykandpatrick.vico.compose.common.component.rememberLineComponent
-import com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis
-import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
-import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
-import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import java.time.LocalDate
-import java.time.YearMonth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,15 +24,15 @@ fun ChartsScreen(
     viewModel: MainViewModel,
     onBack: () -> Unit
 ) {
-    var period by remember { mutableStateOf("month") } // year / month / day
-    var chartType by remember { mutableStateOf("line") } // line / pie (category)
+    var period by remember { mutableStateOf("month") }
+    var chartType by remember { mutableStateOf("line") }
     var selectedType by remember { mutableStateOf("EXPENSE") }
     val now = LocalDate.now()
 
     val monthlyStats by viewModel.monthlyStats.collectAsState()
     val categoryFlow = viewModel.getCategoryDistribution(
         selectedType,
-        if (period == "year") now.year else if (period == "month") now.year else now.year,
+        if (period != "all") now.year else null,
         if (period == "month" || period == "day") now.monthValue else null,
         if (period == "day") now.dayOfMonth else null
     )
@@ -65,7 +58,6 @@ fun ChartsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 时间维度
             Text("统计维度", style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TypeChip("按年", period == "year", MaterialTheme.colorScheme.primary) { period = "year" }
@@ -73,17 +65,24 @@ fun ChartsScreen(
                 TypeChip("按日", period == "day", MaterialTheme.colorScheme.primary) { period = "day" }
             }
 
-            // 图表类型
             Text("图表类型", style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TypeChip("消费折线", chartType == "line", MaterialTheme.colorScheme.secondary) { chartType = "line" }
-                TypeChip("大类分布", chartType == "pie", MaterialTheme.colorScheme.secondary) { chartType = "pie" }
+                TypeChip("消费折线", chartType == "line", MaterialTheme.colorScheme.secondary) {
+                    chartType = "line"
+                }
+                TypeChip("大类分布", chartType == "pie", MaterialTheme.colorScheme.secondary) {
+                    chartType = "pie"
+                }
             }
 
             if (chartType == "pie") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TypeChip("支出", selectedType == "EXPENSE", Color(0xFFD32F2F)) { selectedType = "EXPENSE" }
-                    TypeChip("收入", selectedType == "INCOME", Color(0xFF388E3C)) { selectedType = "INCOME" }
+                    TypeChip("支出", selectedType == "EXPENSE", Color(0xFFD32F2F)) {
+                        selectedType = "EXPENSE"
+                    }
+                    TypeChip("收入", selectedType == "INCOME", Color(0xFF388E3C)) {
+                        selectedType = "INCOME"
+                    }
                 }
             }
 
@@ -95,26 +94,36 @@ fun ChartsScreen(
                     if (monthlyStats.isEmpty()) {
                         Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
-                        val modelProducer = remember { CartesianChartModelProducer() }
-                        LaunchedEffect(monthlyStats) {
-                            modelProducer.runTransaction {
-                                lineSeries {
-                                    series(monthlyStats.map { it.expense })
+                        val expenses = monthlyStats.map { it.expense.toFloat() }
+                        val maxE = (expenses.maxOrNull() ?: 1f).coerceAtLeast(1f)
+                        val lineColor = MaterialTheme.colorScheme.primary
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                                .padding(vertical = 8.dp)
+                        ) {
+                            val w = size.width
+                            val h = size.height
+                            val n = expenses.size
+                            if (n == 1) {
+                                val y = h - (expenses[0] / maxE) * h * 0.85f
+                                drawCircle(lineColor, radius = 6f, center = Offset(w / 2, y))
+                            } else if (n > 1) {
+                                val path = Path()
+                                expenses.forEachIndexed { i, v ->
+                                    val x = i * w / (n - 1)
+                                    val y = h - (v / maxE) * h * 0.85f
+                                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                }
+                                drawPath(path, lineColor, style = Stroke(width = 4f))
+                                expenses.forEachIndexed { i, v ->
+                                    val x = i * w / (n - 1)
+                                    val y = h - (v / maxE) * h * 0.85f
+                                    drawCircle(lineColor, radius = 5f, center = Offset(x, y))
                                 }
                             }
                         }
-                        CartesianChartHost(
-                            chart = rememberCartesianChart(
-                                rememberLineCartesianLayer(),
-                                startAxis = VerticalAxis.rememberStart(),
-                                bottomAxis = HorizontalAxis.rememberBottom()
-                            ),
-                            modelProducer = modelProducer,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(260.dp)
-                        )
-                        // 简易标签
                         Text(
                             "最近月份: " + monthlyStats.takeLast(6).joinToString(" | ") {
                                 "${it.year}-${it.month}: ¥${"%.0f".format(it.expense)}"
