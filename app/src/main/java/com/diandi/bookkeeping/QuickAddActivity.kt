@@ -124,7 +124,7 @@ private fun QuickAddScreen(
             }
             OutlinedTextField(
                 value = amountText,
-                onValueChange = { amountText = it.filter { c -> c.isDigit() || c == "." } },
+                onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' } },
                 label = { Text("金额") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
