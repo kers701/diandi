@@ -173,6 +173,33 @@ fun HomeScreen(
 
             Spacer(Modifier.height(8.dp))
 
+            // 二级时间筛选：年 / 月 / 日
+            val today = LocalDate.now()
+            val isAllTime = filter.year == null && filter.month == null && filter.day == null
+            val isThisYear = filter.year == today.year && filter.month == null && filter.day == null
+            val isThisMonth = filter.year == today.year && filter.month == today.monthValue && filter.day == null
+            val isToday = filter.year == today.year && filter.month == today.monthValue && filter.day == today.dayOfMonth
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TypeChip("全部", isAllTime, MaterialTheme.colorScheme.tertiary) {
+                    viewModel.updateFilter(year = null, month = null, day = null)
+                }
+                TypeChip("本年", isThisYear, MaterialTheme.colorScheme.tertiary) {
+                    viewModel.updateFilter(year = today.year, month = null, day = null)
+                }
+                TypeChip("本月", isThisMonth, MaterialTheme.colorScheme.tertiary) {
+                    viewModel.updateFilter(year = today.year, month = today.monthValue, day = null)
+                }
+                TypeChip("本日", isToday, MaterialTheme.colorScheme.tertiary) {
+                    viewModel.updateFilter(
+                        year = today.year,
+                        month = today.monthValue,
+                        day = today.dayOfMonth
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
             if (filter.year != null || filter.month != null || filter.day != null || filter.category != null) {
                 Text(
                     "当前筛选: ${filter.year ?: "年"}年${filter.month?.let { "${it}月" } ?: ""}${filter.day?.let { "${it}日" } ?: ""} ${filter.category ?: ""}",
