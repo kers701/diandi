@@ -74,21 +74,11 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleIntent(intent)
         // recreate content path by navigating
-        when (intent.action) {
-            KeepAliveService.ACTION_ADD_EXPENSE,
-            KeepAliveService.ACTION_ADD_INCOME -> {
-                navControllerRef?.navigate(Screen.Add.route) {
-                    launchSingleTop = true
-                }
-            }
-        }
+        // no-op for notification (QuickAddActivity)
     }
 
     private fun handleIntent(intent: Intent?) {
-        when (intent?.action) {
-            KeepAliveService.ACTION_ADD_EXPENSE -> pendingAddType.set("EXPENSE")
-            KeepAliveService.ACTION_ADD_INCOME -> pendingAddType.set("INCOME")
-        }
+        // 通知已改为打开 QuickAddActivity，主界面不再处理记账 action
     }
 
     private fun requestNotifAndStartService() {

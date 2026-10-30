@@ -29,6 +29,17 @@
             </intent-filter>
         </activity>
 
+        <!-- 通知点击：独立任务，排除近期任务，关闭即销毁 -->
+        <activity
+            android:name=".QuickAddActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:finishOnTaskLaunch="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Diandi"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".service.KeepAliveService"
             android:exported="false"

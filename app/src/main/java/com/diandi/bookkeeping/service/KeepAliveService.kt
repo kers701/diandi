@@ -1,5 +1,6 @@
 package com.diandi.bookkeeping.service
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,21 +13,33 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
-import com.diandi.bookkeeping.MainActivity
-import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.QuickAddActivity
 import com.diandi.bookkeeping.data.db.AppDatabase
+import com.diandi.bookkeeping.util.AppPrefs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
 /**
- * 常驻前台通知：每 2 分钟刷新攒钱进度，提供「消费 / 收益」快捷入口。
+ * 常驻前台通知（独立进程 :notify），策略对齐 wallpaper_app：
+ * - PARTIAL_WAKE_LOCK
+ * - START_STICKY
+ * - onTaskRemoved 后 AlarmManager 自启
+ * - 点击通知打开独立记账页（不进主界面栈）
  */
 class KeepAliveService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
+    private var wakeLock: PowerManager.WakeLock? = null
+
     private val refreshRunnable = object : Runnable {
         override fun run() {
+            if (!AppPrefs.isNotifyEnabled(this@KeepAliveService)) {
+                stopSelf()
+                return
+            }
             updateNotification()
             handler.postDelayed(this, REFRESH_MS)
         }
@@ -36,30 +49,90 @@ class KeepAliveService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "diandi:fgs")
+            .apply { setReferenceCounted(false) }
         createChannel()
         val notification = buildNotification("加载中…", 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIF_ID, notification)
-        }
+        startFg(notification)
+        acquireWake()
         handler.post(refreshRunnable)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!AppPrefs.isNotifyEnabled(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         updateNotification()
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (!AppPrefs.isNotifyEnabled(this)) return
+        try {
+            val restart = Intent(applicationContext, KeepAliveService::class.java)
+            val pi = PendingIntent.getService(
+                applicationContext, 99, restart,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+            (getSystemService(Context.ALARM_SERVICE) as AlarmManager).set(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + 1200L,
+                pi
+            )
+        } catch (_: Exception) {
+        }
+    }
+
     override fun onDestroy() {
         handler.removeCallbacks(refreshRunnable)
+        releaseWake()
         super.onDestroy()
+    }
+
+    private fun startFg(notification: Notification) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIF_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIF_ID, notification)
+            }
+        } catch (_: Exception) {
+            try {
+                startForeground(NOTIF_ID, notification)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun acquireWake() {
+        try {
+            if (wakeLock?.isHeld != true) wakeLock?.acquire(10 * 60 * 1000L)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun releaseWake() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (_: Exception) {
+        }
     }
 
     private fun updateNotification() {
         val (text, progress) = computeProgressText()
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIF_ID, buildNotification(text, progress))
+        val n = buildNotification(text, progress)
+        startFg(n)
+        getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, n)
     }
 
     private fun computeProgressText(): Pair<String, Int> {
@@ -70,9 +143,7 @@ class KeepAliveService : Service() {
                 val inc = dao.getTotalIncome().first()
                 val exp = dao.getTotalExpense().first()
                 val goals = dao.getAllGoals().first()
-                val bal = c + inc - exp
-                val target = goals.sumOf { it.targetAmount }
-                bal to target
+                (c + inc - exp) to goals.sumOf { it.targetAmount }
             }
             val pct = if (targetSum > 0) {
                 ((balance / targetSum) * 100).coerceIn(0.0, 999.0)
@@ -80,35 +151,21 @@ class KeepAliveService : Service() {
             val text = if (targetSum > 0) {
                 "攒钱进度 ${"%.0f".format(pct)}% · 余额¥${"%.0f".format(balance)} / 目标¥${"%.0f".format(targetSum)}"
             } else {
-                "余额 ¥${"%.2f".format(balance)} · 暂无攒钱目标"
+                "余额 ¥${"%.2f".format(balance)} · 点击记一笔"
             }
             text to pct.toInt().coerceIn(0, 100)
-        } catch (e: Exception) {
-            ("点滴记账运行中") to 0
+        } catch (_: Exception) {
+            "点滴记账 · 点击记一笔" to 0
         }
     }
 
     private fun buildNotification(content: String, progress: Int): Notification {
-        val openApp = PendingIntent.getActivity(
+        val openQuick = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val expensePi = PendingIntent.getActivity(
-            this, 1,
-            Intent(this, MainActivity::class.java).apply {
-                action = ACTION_ADD_EXPENSE
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val incomePi = PendingIntent.getActivity(
-            this, 2,
-            Intent(this, MainActivity::class.java).apply {
-                action = ACTION_ADD_INCOME
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            Intent(this, QuickAddActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_NO_HISTORY
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -118,14 +175,13 @@ class KeepAliveService : Service() {
             .setContentTitle("点滴记账")
             .setContentText(content)
             .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-            .setContentIntent(openApp)
+            .setContentIntent(openQuick)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .addAction(0, "消费", expensePi)
-            .addAction(0, "收益", incomePi)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         if (progress in 1..99) {
             builder.setProgress(100, progress, false)
@@ -140,7 +196,7 @@ class KeepAliveService : Service() {
                 "点滴常驻",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "显示攒钱进度，防止进程被系统回收"
+                description = "显示攒钱进度，独立进程防杀"
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
@@ -151,8 +207,7 @@ class KeepAliveService : Service() {
         const val CHANNEL_ID = "diandi_keepalive"
         const val NOTIF_ID = 10086
         const val REFRESH_MS = 2 * 60 * 1000L
-        const val ACTION_ADD_EXPENSE = "com.diandi.bookkeeping.ADD_EXPENSE"
-        const val ACTION_ADD_INCOME = "com.diandi.bookkeeping.ADD_INCOME"
+        const val ACTION_STOP = "com.diandi.bookkeeping.STOP_KEEPALIVE"
 
         fun start(context: Context) {
             if (!AppPrefs.isNotifyEnabled(context)) return
@@ -165,7 +220,9 @@ class KeepAliveService : Service() {
         }
 
         fun stop(context: Context) {
-            context.stopService(Intent(context, KeepAliveService::class.java))
+            context.stopService(Intent(context, KeepAliveService::class.java).apply {
+                action = ACTION_STOP
+            })
         }
     }
 }

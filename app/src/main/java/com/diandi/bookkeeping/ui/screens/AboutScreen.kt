@@ -69,13 +69,13 @@ fun AboutScreen(onBack: () -> Unit) {
             HelpLine("资金修正", "调整起始余额（例如修正 +800，初始余额即为 800）。")
             HelpLine("统计图表", "支出趋势与大类分布，可按年/月/日维度查看。")
             HelpLine("检查更新", "首页顶栏更新图标，从 GitHub Releases 检测并下载安装。")
-            HelpLine("通知快捷", "常驻通知可一键记「消费/收益」；通知运行在独立进程，减少被划掉后消失。")
+            HelpLine("通知快捷", "点击常驻通知打开独立记账页，保存后关闭，不进入主界面；独立进程 + 划掉后自启。")
 
             HorizontalDivider()
 
             Text("常驻通知", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "开启后每 2 分钟刷新攒钱进度，并显示消费/收益按钮。关闭后立即停止通知服务，不再发起通知。",
+                "开启后每 2 分钟刷新攒钱进度，点击通知可快速记账。关闭后立即停止通知服务，不再发起通知。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
