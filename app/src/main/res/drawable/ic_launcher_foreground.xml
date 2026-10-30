@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 简单水滴形状代表「点滴」 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 C54,20 30,50 30,65 C30,78 40,88 54,88 C68,88 78,78 78,65 C78,50 54,20 54,20 Z"/>
+    <path
+        android:fillColor="#A5D6A7"
+        android:pathData="M54,55 C48,55 44,60 44,66 C44,72 48,76 54,76 C60,76 64,72 64,66 C64,60 60,55 54,55 Z"/>
+</vector>

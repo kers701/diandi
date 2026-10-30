@@ -1,0 +1,88 @@
+package com.diandi.bookkeeping.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import java.text.NumberFormat
+import java.util.Locale
+
+fun formatMoney(amount: Double): String {
+    val nf = NumberFormat.getCurrencyInstance(Locale.CHINA)
+    return nf.format(amount)
+}
+
+@Composable
+fun BalanceCard(
+    balance: Double,
+    income: Double,
+    expense: Double,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("当前余额", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                formatMoney(balance),
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("收入", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    Text(
+                        formatMoney(income),
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("支出", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    Text(
+                        formatMoney(expense),
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TypeChip(
+    text: String,
+    selected: Boolean,
+    color: Color,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(text) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = color.copy(alpha = 0.2f),
+            selectedLabelColor = color
+        )
+    )
+}
