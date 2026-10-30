@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * 从 GitHub Releases 检查并下载最新 APK（与 wallpaper_app 同逻辑）。
- * 默认仓库：kers701/DiandiApp — 若你的仓库名不同，请改 OWNER/REPO。
+ * 默认仓库：kers701/diandi — 若你的仓库名不同，请改 OWNER/REPO。
  */
 object AppUpdateChecker {
 

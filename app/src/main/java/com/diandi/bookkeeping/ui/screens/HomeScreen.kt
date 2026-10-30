@@ -45,6 +45,12 @@ fun HomeScreen(
 
     var showFilterSheet by remember { mutableStateOf(false) }
     var tagSearch by remember { mutableStateOf(filter.tagQuery) }
+    var checkUpdate by remember { mutableStateOf(false) }
+    var updateMsg by remember { mutableStateOf<String?>(null) }
+    var updateInfo by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
+    var downloading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
