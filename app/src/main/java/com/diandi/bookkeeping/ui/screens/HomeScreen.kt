@@ -19,6 +19,12 @@ import com.diandi.bookkeeping.ui.components.BalanceCard
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.ui.components.formatMoney
 import com.diandi.bookkeeping.viewmodel.MainViewModel
+import com.diandi.bookkeeping.util.AppUpdateChecker
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -54,6 +60,9 @@ fun HomeScreen(
                     IconButton(onClick = onCorrectionClick) {
                         Icon(Icons.Default.AccountBalance, contentDescription = "资金修正")
                     }
+                    IconButton(onClick = { checkUpdate = true }) {
+                        Icon(Icons.Default.SystemUpdate, contentDescription = "检查更新")
+                    }
                     IconButton(onClick = { showFilterSheet = true }) {
                         Icon(Icons.Default.FilterList, contentDescription = "筛选")
                     }
@@ -77,6 +86,44 @@ fun HomeScreen(
         ) {
             Spacer(Modifier.height(8.dp))
             BalanceCard(balance = balance, income = income, expense = expense)
+
+            val goals by viewModel.goals.collectAsState()
+            val targetSum = goals.sumOf { it.targetAmount }
+            if (targetSum > 0) {
+                val pct = ((balance / targetSum) * 100).coerceIn(0.0, 999.0)
+                Spacer(Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("攒钱进度", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "${"%.0f".format(pct)}%",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { (pct / 100.0).toFloat().coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "余额 ${formatMoney(balance)} / 目标 ${formatMoney(targetSum)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(12.dp))
 
@@ -154,6 +201,82 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+
+    if (checkUpdate) {
+        LaunchedEffect(Unit) {
+            updateMsg = "正在检查…"
+            updateInfo = null
+            val result = withContext(Dispatchers.IO) { AppUpdateChecker.checkLatest() }
+            when (result) {
+                is AppUpdateChecker.CheckResult.UpToDate ->
+                    updateMsg = "已是最新版 ${result.current}"
+                is AppUpdateChecker.CheckResult.UpdateAvailable -> {
+                    updateInfo = result.info
+                    updateMsg = "发现新版本 ${result.info.versionName}"
+                }
+                is AppUpdateChecker.CheckResult.Failed ->
+                    updateMsg = "检查失败：${result.message}"
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { checkUpdate = false },
+            title = { Text("检查更新") },
+            text = {
+                Column {
+                    Text(updateMsg ?: "")
+                    updateInfo?.body?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it.take(400), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                val info = updateInfo
+                if (info != null && info.apkUrl != null) {
+                    TextButton(
+                        enabled = !downloading,
+                        onClick = {
+                            scope.launch {
+                                downloading = true
+                                updateMsg = "下载中…"
+                                val r = withContext(Dispatchers.IO) {
+                                    AppUpdateChecker.downloadApk(context, info)
+                                }
+                                downloading = false
+                                when (r) {
+                                    is AppUpdateChecker.DownloadResult.Ok -> {
+                                        if (!AppUpdateChecker.canInstallPackages(context)) {
+                                            AppUpdateChecker.openInstallPermissionSettings(context)
+                                            updateMsg = "请允许安装未知应用后重试"
+                                        } else {
+                                            AppUpdateChecker.installApk(context, r.file)
+                                            checkUpdate = false
+                                        }
+                                    }
+                                    is AppUpdateChecker.DownloadResult.Failed ->
+                                        updateMsg = r.message
+                                }
+                            }
+                        }
+                    ) { Text(if (downloading) "下载中…" else "下载安装") }
+                } else {
+                    TextButton(onClick = { checkUpdate = false }) { Text("确定") }
+                }
+            },
+            dismissButton = {
+                val info = updateInfo
+                Row {
+                    if (info != null) {
+                        TextButton(onClick = {
+                            AppUpdateChecker.openReleasePage(context, info.htmlUrl)
+                        }) { Text("打开页面") }
+                    }
+                    TextButton(onClick = { checkUpdate = false }) { Text("关闭") }
+                }
+            }
+        )
     }
 
     if (showFilterSheet) {

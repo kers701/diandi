@@ -19,11 +19,17 @@ import java.time.LocalDate
 @Composable
 fun AddScreen(
     viewModel: MainViewModel,
+    initialType: String? = null,
     onBack: () -> Unit
 ) {
-    var type by remember { mutableStateOf("EXPENSE") }
+    var type by remember { mutableStateOf(initialType ?: "EXPENSE") }
     var amountText by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf(Categories.expenseCategories.first()) }
+    var category by remember {
+        mutableStateOf(
+            if (initialType == "INCOME") Categories.incomeCategories.first()
+            else Categories.expenseCategories.first()
+        )
+    }
     var tags by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(LocalDate.now()) }
