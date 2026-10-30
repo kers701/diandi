@@ -20,6 +20,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.diandi.bookkeeping.service.KeepAliveService
+import com.diandi.bookkeeping.util.AppPrefs
 import com.diandi.bookkeeping.ui.navigation.Screen
 import com.diandi.bookkeeping.ui.screens.*
 import com.diandi.bookkeeping.ui.theme.DiandiTheme
@@ -91,6 +92,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestNotifAndStartService() {
+        if (!AppPrefs.isNotifyEnabled(this)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this, Manifest.permission.POST_NOTIFICATIONS
@@ -132,7 +134,8 @@ fun DiandiNav(
                 onAddClick = { navController.navigate(Screen.Add.route) },
                 onChartsClick = { navController.navigate(Screen.Charts.route) },
                 onGoalsClick = { navController.navigate(Screen.Goals.route) },
-                onCorrectionClick = { navController.navigate(Screen.Correction.route) }
+                onCorrectionClick = { navController.navigate(Screen.Correction.route) },
+                onAboutClick = { navController.navigate(Screen.About.route) }
             )
         }
         composable(Screen.Add.route) {
@@ -153,6 +156,9 @@ fun DiandiNav(
         }
         composable(Screen.Correction.route) {
             CorrectionScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+        }
+        composable(Screen.About.route) {
+            AboutScreen(onBack = { navController.popBackStack() })
         }
     }
 }

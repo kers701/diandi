@@ -14,6 +14,7 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.diandi.bookkeeping.MainActivity
+import com.diandi.bookkeeping.util.AppPrefs
 import com.diandi.bookkeeping.data.db.AppDatabase
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -154,12 +155,17 @@ class KeepAliveService : Service() {
         const val ACTION_ADD_INCOME = "com.diandi.bookkeeping.ADD_INCOME"
 
         fun start(context: Context) {
+            if (!AppPrefs.isNotifyEnabled(context)) return
             val i = Intent(context, KeepAliveService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(i)
             } else {
                 context.startService(i)
             }
+        }
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, KeepAliveService::class.java))
         }
     }
 }

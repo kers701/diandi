@@ -35,7 +35,8 @@ fun HomeScreen(
     onAddClick: () -> Unit,
     onChartsClick: () -> Unit,
     onGoalsClick: () -> Unit,
-    onCorrectionClick: () -> Unit
+    onCorrectionClick: () -> Unit,
+    onAboutClick: () -> Unit = {}
 ) {
     val transactions by viewModel.transactions.collectAsState()
     val balance by viewModel.balance.collectAsState()
