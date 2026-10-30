@@ -91,20 +91,25 @@ class KeepAliveService : Service() {
                 startForeground(NOTIF_ID, notification)
             }
         } catch (_: Exception) {
-            try { startForeground(NOTIF_ID, notification) } catch (_: Exception) {}
+            try {
+                startForeground(NOTIF_ID, notification)
+            } catch (_: Exception) {
+            }
         }
     }
 
     private fun acquireWake() {
         try {
             if (wakeLock?.isHeld != true) wakeLock?.acquire(15 * 60 * 1000L)
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
     private fun releaseWake() {
         try {
             if (wakeLock?.isHeld == true) wakeLock?.release()
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
     private fun updateNotification() {
@@ -124,11 +129,19 @@ class KeepAliveService : Service() {
                 val goals = dao.getAllGoals().first()
                 (c + inc - exp) to goals.sumOf { it.targetAmount }
             }
-            val pct = if (targetSum > 0) ((balance / targetSum) * 100).coerceIn(0.0, 999.0) else 0.0
-            val text = if (targetSum > 0) {
-                "攒钱进度 ${\"%.0f\".format(pct)}% · 余额¥${\"%.0f\".format(balance)} / 目标¥${\"%.0f\".format(targetSum)}"
+            val pct = if (targetSum > 0) {
+                ((balance / targetSum) * 100).coerceIn(0.0, 999.0)
             } else {
-                "余额 ¥${\"%.2f\".format(balance)} · 点击记一笔"
+                0.0
+            }
+            val pctStr = "%.0f".format(pct)
+            val bal0 = "%.0f".format(balance)
+            val tgt0 = "%.0f".format(targetSum)
+            val bal2 = "%.2f".format(balance)
+            val text = if (targetSum > 0) {
+                "攒钱进度 ${pctStr}% · 余额¥${bal0} / 目标¥${tgt0}"
+            } else {
+                "余额 ¥${bal2} · 点击记一笔"
             }
             text to pct.toInt().coerceIn(0, 100)
         } catch (_: Exception) {
@@ -160,13 +173,19 @@ class KeepAliveService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        if (progress in 1..99) builder.setProgress(100, progress, false)
+        if (progress in 1..99) {
+            builder.setProgress(100, progress, false)
+        }
         return builder.build()
     }
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "点滴常驻", NotificationManager.IMPORTANCE_LOW).apply {
+            val ch = NotificationChannel(
+                CHANNEL_ID,
+                "点滴常驻",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
                 description = "显示攒钱进度，独立进程防杀"
                 setShowBadge(false)
             }
@@ -184,15 +203,24 @@ class KeepAliveService : Service() {
             if (!AppPrefs.isNotifyEnabled(context)) return
             val i = Intent(context, KeepAliveService::class.java)
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i)
-                else context.startService(i)
-            } catch (_: Exception) {}
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(i)
+                } else {
+                    context.startService(i)
+                }
+            } catch (_: Exception) {
+            }
         }
 
         fun stop(context: Context) {
             try {
-                context.stopService(Intent(context, KeepAliveService::class.java).apply { action = ACTION_STOP })
-            } catch (_: Exception) {}
+                context.stopService(
+                    Intent(context, KeepAliveService::class.java).apply {
+                        action = ACTION_STOP
+                    }
+                )
+            } catch (_: Exception) {
+            }
         }
 
         fun scheduleRestartAlarm(context: Context) {
@@ -213,7 +241,8 @@ class KeepAliveService : Service() {
                 } else {
                     am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, trigger, pi)
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
         }
     }
 }
