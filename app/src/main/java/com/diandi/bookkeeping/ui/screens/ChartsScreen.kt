@@ -8,15 +8,34 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import java.time.LocalDate
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+
+private val PIE_COLORS = listOf(
+    Color(0xFF5C6BC0),
+    Color(0xFF26A69A),
+    Color(0xFFEF5350),
+    Color(0xFFFFA726),
+    Color(0xFFAB47BC),
+    Color(0xFF42A5F5),
+    Color(0xFF66BB6A),
+    Color(0xFFEC407A),
+    Color(0xFF8D6E63),
+    Color(0xFF78909C)
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,38 +113,68 @@ fun ChartsScreen(
                     if (monthlyStats.isEmpty()) {
                         Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
+                        val labels = monthlyStats.map { "${it.year}-${it.month}" }
                         val expenses = monthlyStats.map { it.expense.toFloat() }
                         val maxE = (expenses.maxOrNull() ?: 1f).coerceAtLeast(1f)
                         val lineColor = MaterialTheme.colorScheme.primary
+                        val labelColor = MaterialTheme.colorScheme.onSurface
                         Canvas(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(220.dp)
+                                .height(260.dp)
                                 .padding(vertical = 8.dp)
                         ) {
                             val w = size.width
                             val h = size.height
+                            val topPad = 28f
+                            val bottomPad = 36f
+                            val chartH = h - topPad - bottomPad
                             val n = expenses.size
-                            if (n == 1) {
-                                val y = h - (expenses[0] / maxE) * h * 0.85f
-                                drawCircle(lineColor, radius = 6f, center = Offset(w / 2, y))
-                            } else if (n > 1) {
+                            val points = expenses.mapIndexed { i, v ->
+                                val x = if (n == 1) w / 2f else i * w / (n - 1)
+                                val y = topPad + chartH - (v / maxE) * chartH * 0.9f
+                                Offset(x, y) to v
+                            }
+                            if (n >= 2) {
                                 val path = Path()
-                                expenses.forEachIndexed { i, v ->
-                                    val x = i * w / (n - 1)
-                                    val y = h - (v / maxE) * h * 0.85f
-                                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                points.forEachIndexed { i, (pt, _) ->
+                                    if (i == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
                                 }
                                 drawPath(path, lineColor, style = Stroke(width = 4f))
-                                expenses.forEachIndexed { i, v ->
-                                    val x = i * w / (n - 1)
-                                    val y = h - (v / maxE) * h * 0.85f
-                                    drawCircle(lineColor, radius = 5f, center = Offset(x, y))
-                                }
+                            }
+                            val textPaint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.argb(
+                                    (labelColor.alpha * 255).toInt(),
+                                    (labelColor.red * 255).toInt(),
+                                    (labelColor.green * 255).toInt(),
+                                    (labelColor.blue * 255).toInt()
+                                )
+                                textAlign = android.graphics.Paint.Align.CENTER
+                                isAntiAlias = true
+                            }
+                            points.forEachIndexed { i, (pt, v) ->
+                                drawCircle(lineColor, radius = 7f, center = pt)
+                                drawCircle(Color.White, radius = 3.5f, center = pt)
+                                // 数值标注
+                                textPaint.textSize = 28f
+                                drawContext.canvas.nativeCanvas.drawText(
+                                    formatShort(v),
+                                    pt.x,
+                                    (pt.y - 14f).coerceAtLeast(22f),
+                                    textPaint
+                                )
+                                // 月份标签
+                                textPaint.textSize = 24f
+                                drawContext.canvas.nativeCanvas.drawText(
+                                    labels.getOrElse(i) { "" }.takeLast(5),
+                                    pt.x,
+                                    h - 8f,
+                                    textPaint
+                                )
                             }
                         }
                         Text(
-                            "最近月份: " + monthlyStats.takeLast(6).joinToString(" | ") {
+                            "最近: " + monthlyStats.takeLast(6).joinToString(" | ") {
                                 "${it.year}-${it.month}: ¥${"%.0f".format(it.expense)}"
                             },
                             style = MaterialTheme.typography.bodySmall
@@ -140,29 +189,91 @@ fun ChartsScreen(
                     if (categoryStats.isEmpty()) {
                         Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
-                        val total = categoryStats.sumOf { it.total }
-                        categoryStats.forEach { stat ->
+                        val total = categoryStats.sumOf { it.total }.coerceAtLeast(0.0001)
+                        // 扇形图
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                                .padding(8.dp)
+                        ) {
+                            val diameter = min(size.width, size.height) * 0.9f
+                            val left = (size.width - diameter) / 2f
+                            val top = (size.height - diameter) / 2f
+                            var startAngle = -90f
+                            categoryStats.forEachIndexed { i, stat ->
+                                val sweep = (stat.total / total * 360.0).toFloat()
+                                drawArc(
+                                    color = PIE_COLORS[i % PIE_COLORS.size],
+                                    startAngle = startAngle,
+                                    sweepAngle = sweep.coerceAtLeast(0.5f),
+                                    useCenter = true,
+                                    topLeft = Offset(left, top),
+                                    size = Size(diameter, diameter)
+                                )
+                                // 扇区中部写百分比（足够大才写）
+                                if (sweep >= 18f) {
+                                    val mid = Math.toRadians((startAngle + sweep / 2).toDouble())
+                                    val cx = left + diameter / 2 + cos(mid).toFloat() * diameter * 0.32f
+                                    val cy = top + diameter / 2 + sin(mid).toFloat() * diameter * 0.32f
+                                    val pct = stat.total / total * 100
+                                    val paint = android.graphics.Paint().apply {
+                                        color = android.graphics.Color.WHITE
+                                        textAlign = android.graphics.Paint.Align.CENTER
+                                        textSize = 30f
+                                        isAntiAlias = true
+                                        isFakeBoldText = true
+                                    }
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        "${"%.0f".format(pct)}%",
+                                        cx,
+                                        cy + 10f,
+                                        paint
+                                    )
+                                }
+                                startAngle += sweep
+                            }
+                        }
+                        // 图例 + 进度条
+                        categoryStats.forEachIndexed { i, stat ->
                             val percent = if (total > 0) (stat.total / total * 100) else 0.0
+                            val color = PIE_COLORS[i % PIE_COLORS.size]
                             Column(Modifier.fillMaxWidth()) {
                                 Row(
                                     Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(stat.category)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Canvas(Modifier.size(12.dp)) {
+                                            drawCircle(color)
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(stat.category)
+                                    }
                                     Text("¥${"%.2f".format(stat.total)}  (${"%.1f".format(percent)}%)")
                                 }
                                 LinearProgressIndicator(
                                     progress = { (percent / 100).toFloat() },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
+                                        .padding(vertical = 4.dp),
+                                    color = color
                                 )
                             }
-                            Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height(4.dp))
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private fun formatShort(v: Float): String {
+    return when {
+        v >= 10000 -> "${"%.1f".format(v / 10000)}万"
+        v >= 1000 -> "${"%.1f".format(v / 1000)}k"
+        else -> "%.0f".format(v)
     }
 }
