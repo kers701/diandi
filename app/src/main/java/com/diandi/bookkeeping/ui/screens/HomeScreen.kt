@@ -70,6 +70,9 @@ fun HomeScreen(
                     IconButton(onClick = { checkUpdate = true }) {
                         Icon(Icons.Default.SystemUpdate, contentDescription = "检查更新")
                     }
+                    IconButton(onClick = onAboutClick) {
+                        Icon(Icons.Default.Info, contentDescription = "软件说明")
+                    }
                     IconButton(onClick = { showFilterSheet = true }) {
                         Icon(Icons.Default.FilterList, contentDescription = "筛选")
                     }

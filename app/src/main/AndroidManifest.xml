@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <application
         android:name=".DiandiApp"
@@ -17,6 +19,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Diandi">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -29,23 +32,24 @@
             </intent-filter>
         </activity>
 
-        <!-- 通知点击：独立任务，排除近期任务，关闭即销毁 -->
+        <!-- 独立任务：与主界面不同 affinity，无进退场动画 -->
         <activity
             android:name=".QuickAddActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:finishOnTaskLaunch="true"
             android:launchMode="singleInstance"
-            android:taskAffinity=""
-            android:theme="@style/Theme.Diandi"
-            android:windowSoftInputMode="adjustResize" />
+            android:taskAffinity="com.diandi.bookkeeping.quickadd"
+            android:theme="@style/Theme.Diandi.QuickAdd"
+            android:windowSoftInputMode="adjustResize"
+            android:noHistory="true" />
 
         <service
             android:name=".service.KeepAliveService"
             android:exported="false"
             android:process=":notify"
-            android:foregroundServiceType="specialUse"
-            android:stopWithTask="false">
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="bookkeeping_keep_alive_notification" />
@@ -56,6 +60,14 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".service.RestartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.diandi.bookkeeping.action.RESTART_NOTIFY" />
             </intent-filter>
         </receiver>
 

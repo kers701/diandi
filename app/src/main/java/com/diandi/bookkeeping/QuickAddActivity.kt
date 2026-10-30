@@ -3,7 +3,6 @@ package com.diandi.bookkeeping
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -16,48 +15,66 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.ui.theme.DiandiTheme
 import com.diandi.bookkeeping.util.Categories
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
-/**
- * 独立记账页：从通知点击进入，保存或关闭后 finish，不进入主界面导航栈。
- */
 class QuickAddActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        overridePendingTransition(0, 0)
         val app = application as DiandiApp
         setContent {
             DiandiTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     QuickAddScreen(
                         onSave = { amount, type, category, tags, note ->
-                            val d = LocalDate.now()
-                            kotlinx.coroutines.runBlocking {
-                                app.repository.addTransaction(
-                                    Transaction(
-                                        amount = amount,
-                                        type = type,
-                                        category = category,
-                                        tags = tags,
-                                        note = note,
-                                        year = d.year,
-                                        month = d.monthValue,
-                                        day = d.dayOfMonth
+                            lifecycleScope.launch {
+                                withContext(Dispatchers.IO) {
+                                    val d = LocalDate.now()
+                                    app.repository.addTransaction(
+                                        Transaction(
+                                            amount = amount,
+                                            type = type,
+                                            category = category,
+                                            tags = tags,
+                                            note = note,
+                                            year = d.year,
+                                            month = d.monthValue,
+                                            day = d.dayOfMonth
+                                        )
                                     )
-                                )
+                                }
+                                closeSelf()
                             }
-                            finish()
                         },
-                        onClose = { finish() }
+                        onClose = { closeSelf() }
                     )
                 }
             }
         }
+    }
+
+    private fun closeSelf() {
+        if (android.os.Build.VERSION.SDK_INT >= 21) finishAndRemoveTask() else finish()
+        overridePendingTransition(0, 0)
+    }
+
+    override fun finish() {
+        super.finish()
+        overridePendingTransition(0, 0)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        closeSelf()
     }
 }
 
@@ -69,13 +86,11 @@ private fun QuickAddScreen(
 ) {
     var type by remember { mutableStateOf("EXPENSE") }
     var amountText by remember { mutableStateOf("") }
-    var category by remember {
-        mutableStateOf(Categories.expenseCategories.first())
-    }
+    var category by remember { mutableStateOf(Categories.expenseCategories.first()) }
     var tags by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
-    val categories = if (type == "EXPENSE") Categories.expenseCategories else Categories.incomeCategories
-    val scope = rememberCoroutineScope()
+    val categories =
+        if (type == "EXPENSE") Categories.expenseCategories else Categories.incomeCategories
 
     Scaffold(
         topBar = {
@@ -107,16 +122,14 @@ private fun QuickAddScreen(
                     category = Categories.incomeCategories.first()
                 }
             }
-
             OutlinedTextField(
                 value = amountText,
-                onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' } },
+                onValueChange = { amountText = it.filter { c -> c.isDigit() || c == "." } },
                 label = { Text("金额") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
             )
-
             Text("大类", style = MaterialTheme.typography.titleSmall)
             categories.chunked(3).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -129,11 +142,10 @@ private fun QuickAddScreen(
                     }
                 }
             }
-
             OutlinedTextField(
                 value = tags,
                 onValueChange = { tags = it },
-                label = { Text("标签（可选，逗号分隔）") },
+                label = { Text("标签（可选）") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -143,14 +155,11 @@ private fun QuickAddScreen(
                 label = { Text("备注（可选）") },
                 modifier = Modifier.fillMaxWidth()
             )
-
             Button(
                 onClick = {
                     val amount = amountText.toDoubleOrNull()
                     if (amount != null && amount > 0) {
-                        scope.launch {
-                            onSave(amount, type, category, tags.trim(), note.trim())
-                        }
+                        onSave(amount, type, category, tags.trim(), note.trim())
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -158,12 +167,6 @@ private fun QuickAddScreen(
             ) {
                 Text("保存并关闭")
             }
-
-            Text(
-                "保存后自动关闭，不会打开主界面",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
