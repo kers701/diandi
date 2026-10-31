@@ -151,7 +151,7 @@ fun HomeScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // 标签搜索
+            // 标签 / 类目搜索
             OutlinedTextField(
                 value = tagSearch,
                 onValueChange = {
@@ -159,7 +159,7 @@ fun HomeScreen(
                     viewModel.updateFilter(tagQuery = it)
                 },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("按标签模糊搜索…") },
+                placeholder = { Text("按标签或类目搜索…") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 singleLine = true,
                 trailingIcon = {

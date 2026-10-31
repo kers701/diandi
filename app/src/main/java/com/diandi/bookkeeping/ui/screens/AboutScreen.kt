@@ -96,7 +96,7 @@ fun AboutScreen(onBack: () -> Unit) {
 
             Text("功能说明", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             HelpLine("添加账单", "右下角 +，可选支出或收入；支持大类、标签、备注与日期。")
-            HelpLine("首页筛选", "类型：全部/支出/收入；时间：全部/本年/本月/本日；另支持标签搜索与详细筛选。")
+            HelpLine("首页筛选", "类型：全部/支出/收入；时间：全部/本年/本月/本日；搜索支持标签与类目模糊匹配；另可详细筛选。")
             HelpLine("攒钱目标", "设置目标金额并记录进度；首页与通知可显示「余额/目标」进度。")
             HelpLine("资金修正", "调整起始余额（例如修正 +800，初始余额即为 800）。")
             HelpLine("统计图表", "支出趋势与大类分布，可按年/月/日维度查看。")
