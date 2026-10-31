@@ -87,7 +87,7 @@ fun AboutScreen(onBack: () -> Unit) {
             )
 
             Text(
-                "本地离线记账应用：记录收支、标签与大类、时间筛选、攒钱目标、资金修正与统计图表。" +
+                "本地离线记账应用：记录收支、标签与大类、时间筛选、攒钱目标、资金修正与统计图表；支持通知自动记账（白名单应用）、常驻通知快捷记账。" +
                     "数据仅保存在本机，无需账号。",
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -100,6 +100,7 @@ fun AboutScreen(onBack: () -> Unit) {
             HelpLine("攒钱目标", "设置目标金额并记录进度；首页与通知可显示「余额/目标」进度。")
             HelpLine("资金修正", "调整起始余额（例如修正 +800，初始余额即为 800）。")
             HelpLine("统计图表", "支出趋势与大类分布，可按年/月/日维度查看。")
+            HelpLine("应用白名单", "在软件说明中选择要监听的支付/短信等应用；选择列表中已勾选项置顶。")
             HelpLine("检查更新", "首页顶栏更新图标，从 GitHub Releases 检测并下载安装。")
             HelpLine("通知快捷", "点击常驻通知打开独立记账页，保存后关闭，不进入主界面；独立进程 + 划掉后自启。")
 
@@ -170,7 +171,7 @@ fun AboutScreen(onBack: () -> Unit) {
 
             Text("应用白名单", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                "必须至少选择一个应用，只有白名单应用的通知才会被识别。",
+                "必须至少选择一个应用，只有白名单应用的通知才会被识别。列表中已勾选应用会置顶显示，便于管理。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -250,11 +251,17 @@ fun AboutScreen(onBack: () -> Unit) {
             onDismissRequest = { showAppPicker = false },
             title = { Text("选择白名单应用") },
             text = {
-                val filteredApps = installedApps.filter { app ->
-                    appSearchQuery.isBlank() ||
-                        app.label.contains(appSearchQuery, ignoreCase = true) ||
-                        app.packageName.contains(appSearchQuery, ignoreCase = true)
-                }
+                val filteredApps = installedApps
+                    .filter { app ->
+                        appSearchQuery.isBlank() ||
+                            app.label.contains(appSearchQuery, ignoreCase = true) ||
+                            app.packageName.contains(appSearchQuery, ignoreCase = true)
+                    }
+                    // 已在白名单（勾选）的应用置顶
+                    .sortedWith(
+                        compareByDescending<LauncherAppInfo> { it.packageName in draftAllowedApps }
+                            .thenBy { it.label.lowercase() }
+                    )
                 Column {
                     OutlinedTextField(
                         value = appSearchQuery,
