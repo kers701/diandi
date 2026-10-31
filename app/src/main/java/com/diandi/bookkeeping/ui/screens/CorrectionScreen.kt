@@ -25,6 +25,7 @@ fun CorrectionScreen(
 ) {
     val corrections by viewModel.corrections.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
+    var correctionToDelete by remember { mutableStateOf<FundCorrection?>(null) }
 
     Scaffold(
         topBar = {
@@ -83,7 +84,7 @@ fun CorrectionScreen(
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
-                                IconButton(onClick = { viewModel.deleteCorrection(c) }) {
+                                IconButton(onClick = { correctionToDelete = c }) {
                                     Icon(Icons.Default.Delete, "删除")
                                 }
                             }
@@ -129,6 +130,30 @@ fun CorrectionScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAdd = false }) { Text("取消") }
+            }
+        )
+    }
+
+    correctionToDelete?.let { correction ->
+        AlertDialog(
+            onDismissRequest = { correctionToDelete = null },
+            title = { Text("删除资金修正？") },
+            text = {
+                Text("确定要删除 ${formatMoney(correction.amount)} 这条资金修正吗？删除后无法恢复。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteCorrection(correction)
+                        correctionToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { correctionToDelete = null }) { Text("取消") }
             }
         )
     }

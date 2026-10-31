@@ -46,6 +46,7 @@ fun HomeScreen(
     val filter by viewModel.filter.collectAsState()
 
     var showFilterSheet by remember { mutableStateOf(false) }
+    var transactionToDelete by remember { mutableStateOf<Transaction?>(null) }
     var tagSearch by remember { mutableStateOf(filter.tagQuery) }
     var checkUpdate by remember { mutableStateOf(false) }
     var updateMsg by remember { mutableStateOf<String?>(null) }
@@ -242,7 +243,7 @@ fun HomeScreen(
                     items(transactions, key = { it.id }) { tx ->
                         TransactionItem(
                             tx = tx,
-                            onDelete = { viewModel.deleteTransaction(tx) }
+                            onDelete = { transactionToDelete = tx }
                         )
                     }
                 }
@@ -333,6 +334,30 @@ fun HomeScreen(
             onApply = { y, m, d, cat ->
                 viewModel.updateFilter(year = y, month = m, day = d, category = cat)
                 showFilterSheet = false
+            }
+        )
+    }
+
+    transactionToDelete?.let { tx ->
+        AlertDialog(
+            onDismissRequest = { transactionToDelete = null },
+            title = { Text("删除账单？") },
+            text = {
+                Text("确定要删除 ${tx.category} ${formatMoney(tx.amount)} 这笔账单吗？删除后无法恢复。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteTransaction(tx)
+                        transactionToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { transactionToDelete = null }) { Text("取消") }
             }
         )
     }

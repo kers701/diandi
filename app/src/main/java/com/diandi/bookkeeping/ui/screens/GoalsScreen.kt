@@ -25,6 +25,7 @@ fun GoalsScreen(
 ) {
     val goals by viewModel.goals.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var goalToDelete by remember { mutableStateOf<SavingsGoal?>(null) }
 
     Scaffold(
         topBar = {
@@ -64,7 +65,7 @@ fun GoalsScreen(
                     GoalCard(
                         goal = goal,
                         onAddProgress = { amount -> viewModel.updateGoalProgress(goal, amount) },
-                        onDelete = { viewModel.deleteGoal(goal) }
+                        onDelete = { goalToDelete = goal }
                     )
                 }
             }
@@ -77,6 +78,30 @@ fun GoalsScreen(
             onConfirm = { title, target ->
                 viewModel.addGoal(title, target)
                 showAddDialog = false
+            }
+        )
+    }
+
+    goalToDelete?.let { goal ->
+        AlertDialog(
+            onDismissRequest = { goalToDelete = null },
+            title = { Text("删除攒钱目标？") },
+            text = {
+                Text("确定要删除“${goal.title}”吗？目标及其进度记录将被删除，且无法恢复。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteGoal(goal)
+                        goalToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { goalToDelete = null }) { Text("取消") }
             }
         )
     }
