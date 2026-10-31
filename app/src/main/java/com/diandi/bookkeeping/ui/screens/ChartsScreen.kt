@@ -86,8 +86,19 @@ fun ChartsScreen(
                 TypeChip("按月", period == "month", MaterialTheme.colorScheme.primary) { period = "month" }
                 TypeChip("按日", period == "day", MaterialTheme.colorScheme.primary) { period = "day" }
             }
-            OutlinedButton(onClick = { showDatePicker = true }) {
-                Text("基准日期：$selectedDate")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(onClick = { showDatePicker = true }) {
+                    Text("基准日期：$selectedDate")
+                }
+                TextButton(
+                    onClick = { selectedDate = LocalDate.now() },
+                    enabled = selectedDate != LocalDate.now()
+                ) {
+                    Text("还原本日")
+                }
             }
 
             Text("图表类型", style = MaterialTheme.typography.titleSmall)
