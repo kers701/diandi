@@ -29,7 +29,7 @@ class QuickAddActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        overridePendingTransition(0, 0)
+        overridePendingTransition(R.anim.quick_add_fade_in, R.anim.quick_add_fade_out)
         val app = application as DiandiApp
         setContent {
             DiandiTheme {
@@ -64,12 +64,12 @@ class QuickAddActivity : ComponentActivity() {
 
     private fun closeSelf() {
         if (android.os.Build.VERSION.SDK_INT >= 21) finishAndRemoveTask() else finish()
-        overridePendingTransition(0, 0)
+        overridePendingTransition(R.anim.quick_add_fade_in, R.anim.quick_add_fade_out)
     }
 
     override fun finish() {
         super.finish()
-        overridePendingTransition(0, 0)
+        overridePendingTransition(R.anim.quick_add_fade_in, R.anim.quick_add_fade_out)
     }
 
     @Deprecated("Deprecated in Java")

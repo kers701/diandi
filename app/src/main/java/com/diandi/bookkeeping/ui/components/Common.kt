@@ -24,11 +24,12 @@ fun BalanceCard(
     balance: Double,
     income: Double,
     expense: Double,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    accentColor: Color = MaterialTheme.colorScheme.primary
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+        colors = CardDefaults.cardColors(containerColor = accentColor),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(

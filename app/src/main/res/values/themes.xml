@@ -3,7 +3,14 @@
     <style name="Theme.Diandi" parent="android:Theme.Material.Light.NoActionBar" />
 
     <style name="Theme.Diandi.QuickAdd" parent="Theme.Diandi">
-        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowAnimationStyle">@style/QuickAddWindowAnimation</item>
         <item name="android:windowDisablePreview">true</item>
+    </style>
+
+    <style name="QuickAddWindowAnimation" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/quick_add_fade_in</item>
+        <item name="android:activityOpenExitAnimation">@anim/quick_add_fade_out</item>
+        <item name="android:activityCloseEnterAnimation">@anim/quick_add_fade_in</item>
+        <item name="android:activityCloseExitAnimation">@anim/quick_add_fade_out</item>
     </style>
 </resources>

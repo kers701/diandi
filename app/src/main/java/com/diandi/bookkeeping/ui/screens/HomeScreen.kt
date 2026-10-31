@@ -27,6 +27,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,11 +53,15 @@ fun HomeScreen(
     var downloading by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val balanceAccent = balanceAccentColor(balance)
+    val balanceBackground = balanceAccent.copy(alpha = 0.07f)
 
     Scaffold(
+        containerColor = balanceBackground,
         topBar = {
             TopAppBar(
                 title = { Text("点滴", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = balanceBackground),
                 actions = {
                     IconButton(onClick = onChartsClick) {
                         Icon(Icons.Default.BarChart, contentDescription = "图表")
@@ -95,7 +100,12 @@ fun HomeScreen(
                 .padding(horizontal = 16.dp)
         ) {
             Spacer(Modifier.height(8.dp))
-            BalanceCard(balance = balance, income = income, expense = expense)
+            BalanceCard(
+                balance = balance,
+                income = income,
+                expense = expense,
+                accentColor = balanceAccent
+            )
 
             val goals by viewModel.goals.collectAsState()
             val targetSum = goals.sumOf { it.targetAmount }
@@ -326,6 +336,22 @@ fun HomeScreen(
             }
         )
     }
+}
+
+private fun balanceAccentColor(balance: Double): Color {
+    val neutral = Color(0xFF607D8B)
+    val target = when {
+        balance > 0.0 -> Color(0xFF2E7D32)
+        balance < 0.0 -> Color(0xFFC62828)
+        else -> Color(0xFF8D6E63)
+    }
+    val strength = (abs(balance) / (abs(balance) + 1000.0)).toFloat().coerceIn(0.0f, 1.0f)
+    return Color(
+        red = neutral.red + (target.red - neutral.red) * strength,
+        green = neutral.green + (target.green - neutral.green) * strength,
+        blue = neutral.blue + (target.blue - neutral.blue) * strength,
+        alpha = 1.0f
+    )
 }
 
 @Composable
