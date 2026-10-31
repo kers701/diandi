@@ -52,17 +52,9 @@ fun AboutScreen(onBack: () -> Unit) {
     var showAppPicker by remember { mutableStateOf(false) }
     var draftAllowedApps by remember { mutableStateOf(emptySet<String>()) }
     var appSearchQuery by remember { mutableStateOf("") }
+    // 与 wallpaper_app 相同：全部可启动应用（含系统预装），不按 FLAG_SYSTEM 剔除
     val installedApps = remember(context) {
-        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        context.packageManager
-            .queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
-            .mapNotNull { it.activityInfo?.applicationInfo }
-            .filter {
-                it.packageName != context.packageName &&
-                    it.flags and ApplicationInfo.FLAG_SYSTEM == 0
-            }
-            .distinctBy { it.packageName }
-            .sortedBy { it.loadLabel(context.packageManager).toString().lowercase() }
+        InstalledAppsHelper.listLaunchableApps(context)
     }
 
     Scaffold(
@@ -257,9 +249,8 @@ fun AboutScreen(onBack: () -> Unit) {
             title = { Text("选择白名单应用") },
             text = {
                 val filteredApps = installedApps.filter { app ->
-                    val label = app.loadLabel(context.packageManager).toString()
                     appSearchQuery.isBlank() ||
-                        label.contains(appSearchQuery, ignoreCase = true) ||
+                        app.label.contains(appSearchQuery, ignoreCase = true) ||
                         app.packageName.contains(appSearchQuery, ignoreCase = true)
                 }
                 Column {
@@ -270,6 +261,12 @@ fun AboutScreen(onBack: () -> Unit) {
                         singleLine = true,
                         label = { Text("搜索应用") },
                         placeholder = { Text("应用名称或包名") }
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${filteredApps.size} / ${installedApps.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(8.dp))
                     LazyColumn(Modifier.heightIn(max = 380.dp)) {
@@ -299,7 +296,9 @@ fun AboutScreen(onBack: () -> Unit) {
                                 }
                             )
                             Column(Modifier.padding(start = 8.dp)) {
-                                Text(app.loadLabel(context.packageManager).toString())
+                                Text(
+                                    if (app.isSystem) "${app.label}（系统）" else app.label
+                                )
                                 Text(
                                     app.packageName,
                                     style = MaterialTheme.typography.bodySmall,

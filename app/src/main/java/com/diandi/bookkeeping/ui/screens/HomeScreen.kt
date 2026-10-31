@@ -478,8 +478,13 @@ fun FilterBottomSheet(
     var showDatePicker by remember { mutableStateOf(false) }
     var selectingStart by remember { mutableStateOf(true) }
     var showCategoryPicker by remember { mutableStateOf(false) }
-    val allCategories = remember {
-        (Categories.expenseCategories + Categories.incomeCategories).distinct()
+    // 大类列表跟随支出/收入类型；未选类型时显示全部
+    val selectableCategories = remember(selectedType) {
+        when (selectedType) {
+            "EXPENSE" -> Categories.expenseCategories
+            "INCOME" -> Categories.incomeCategories
+            else -> (Categories.expenseCategories + Categories.incomeCategories).distinct()
+        }
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -493,9 +498,11 @@ fun FilterBottomSheet(
                 }
                 TypeChip("支出", selectedType == "EXPENSE", Color(0xFFD32F2F)) {
                     selectedType = "EXPENSE"
+                    categories = categories.intersect(Categories.expenseCategories.toSet())
                 }
                 TypeChip("收入", selectedType == "INCOME", Color(0xFF388E3C)) {
                     selectedType = "INCOME"
+                    categories = categories.intersect(Categories.incomeCategories.toSet())
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -590,7 +597,7 @@ fun FilterBottomSheet(
                         .heightIn(max = 420.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
-                    allCategories.forEach { category ->
+                    selectableCategories.forEach { category ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
