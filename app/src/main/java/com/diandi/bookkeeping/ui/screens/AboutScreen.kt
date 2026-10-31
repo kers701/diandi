@@ -167,7 +167,6 @@ fun AboutScreen(onBack: () -> Unit) {
                 ) {
                     Text("打开通知读取权限设置")
                 }
-            }
 
             Text("应用白名单", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
@@ -235,6 +234,8 @@ fun AboutScreen(onBack: () -> Unit) {
                     blockedKeywords = next
                 }
             )
+
+            }
 
             HorizontalDivider()
             Text(
