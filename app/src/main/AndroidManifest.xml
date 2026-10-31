@@ -55,6 +55,16 @@
                 android:value="bookkeeping_keep_alive_notification" />
         </service>
 
+        <service
+            android:name=".service.AutoBillNotificationService"
+            android:exported="true"
+            android:label="点滴自动记账"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".service.BootReceiver"
             android:exported="true">

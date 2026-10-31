@@ -1,8 +1,10 @@
 package com.diandi.bookkeeping.ui.screens
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +27,9 @@ fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var notifyOn by remember {
         mutableStateOf(AppPrefs.isNotifyEnabled(context))
+    }
+    var autoBillOn by remember {
+        mutableStateOf(AppPrefs.isAutoBillEnabled(context))
     }
 
     Scaffold(
@@ -103,6 +108,45 @@ fun AboutScreen(onBack: () -> Unit) {
                         }
                     }
                 )
+            }
+
+            Text("自动记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "读取已授权的消费、支付、收款和收入通知，识别金额后自动生成账单。仅处理包含收支关键词的通知，数据仍只保存在本机。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("启用自动记账", style = MaterialTheme.typography.bodyLarge)
+                Switch(
+                    checked = autoBillOn,
+                    onCheckedChange = { enabled ->
+                        autoBillOn = enabled
+                        AppPrefs.setAutoBillEnabled(context, enabled)
+                        if (enabled) {
+                            try {
+                                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            } catch (_: Exception) {
+                            }
+                        }
+                    }
+                )
+            }
+            if (autoBillOn) {
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        } catch (_: Exception) {
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("打开通知读取权限设置")
+                }
             }
 
             HorizontalDivider()
