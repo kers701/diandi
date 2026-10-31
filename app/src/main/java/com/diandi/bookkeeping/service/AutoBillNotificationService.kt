@@ -24,10 +24,13 @@ class AutoBillNotificationService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (!AppPrefs.isAutoBillEnabled(this) || sbn.packageName == packageName) return
+        if (!AppPrefs.isAutoBillEnabled(this) ||
+            sbn.packageName == packageName ||
+            !AppPrefs.isAutoBillAppAllowed(this, sbn.packageName)
+        ) return
 
         val content = notificationText(sbn) ?: return
-        val parsed = AutoBillParser.parse(content) ?: return
+        val parsed = AutoBillParser.parse(content, this) ?: return
         val fingerprint = AutoBillParser.fingerprint(sbn, content, parsed.amount)
         if (!AppPrefs.rememberAutoBillNotification(
                 this,
@@ -88,21 +91,20 @@ object AutoBillParser {
         "(?<![\\d.])(?:¥|￥|RMB|人民币)?\\s*([0-9]{1,9}(?:,[0-9]{3})*(?:\\.[0-9]{1,2})?)(?![\\d.])",
         RegexOption.IGNORE_CASE
     )
-    private val expenseKeywords = listOf("消费", "支付", "付款", "扣款", "支出", "已花", "买入")
-    private val incomeKeywords = listOf("收款", "收入", "到账", "转入", "入账", "红包", "提现")
-    private val paymentKeywords = expenseKeywords + incomeKeywords
-    private val noiseKeywords = listOf(
-        "活动", "优惠", "广告", "推广", "新闻", "资讯", "文章", "法院", "案例",
-        "拒绝", "返还", "概不负责", "点击", "详情", "领取", "中奖", "抽奖", "招聘",
-        "报名", "分享", "推送", "促销", "贷款广告"
-    )
-
-    fun parse(content: String): ParsedAutoBill? {
+    fun parse(content: String, context: android.content.Context): ParsedAutoBill? {
         val text = content.replace('\n', ' ').trim()
         val lower = text.lowercase(Locale.ROOT)
+        val expenseKeywords = AutoBillKeywords.expense + AppPrefs.getAutoBillAllowedKeywords(context)
+        val incomeKeywords = AutoBillKeywords.income
+        val paymentKeywords = expenseKeywords + incomeKeywords
+        val blockedKeywords = AutoBillKeywords.noise + AppPrefs.getAutoBillBlockedKeywords(context)
+        // 黑名单先判断，和白名单或预设关键词冲突时始终以黑名单为准。
+        if (blockedKeywords.any { text.contains(it, ignoreCase = true) }) return null
         // 新闻、营销文案通常很长且包含多个无关金额，不能当作交易通知处理。
-        if (text.length > 220 || noiseKeywords.any { text.contains(it) }) return null
-        if (paymentKeywords.none { text.contains(it) } && !lower.contains("payment") && !lower.contains("received")) {
+        if (text.length > 220) return null
+        if (paymentKeywords.none { text.contains(it, ignoreCase = true) } &&
+            !lower.contains("payment") && !lower.contains("received")
+        ) {
             return null
         }
         val amount = amountRegex.findAll(text).mapNotNull { match ->
@@ -113,14 +115,14 @@ object AutoBillParser {
             val nearbyStart = (match.range.first - 28).coerceAtLeast(0)
             val nearbyEnd = (match.range.last + 29).coerceAtMost(text.length)
             val nearby = text.substring(nearbyStart, nearbyEnd)
-            val hasTransactionKeyword = paymentKeywords.any { nearby.contains(it) } ||
+            val hasTransactionKeyword = paymentKeywords.any { nearby.contains(it, ignoreCase = true) } ||
                 nearby.lowercase(Locale.ROOT).let {
                     it.contains("payment") || it.contains("received") || it.contains("income")
                 }
             if (!hasTransactionKeyword) return@mapNotNull null
 
             val distance = paymentKeywords.mapNotNull { keyword ->
-                val index = text.indexOf(keyword, nearbyStart)
+                val index = text.indexOf(keyword, nearbyStart, ignoreCase = true)
                 if (index in nearbyStart until nearbyEnd) abs(index - match.range.first) else null
             }.minOrNull() ?: 99
             val hasCurrency = match.value.contains("¥") || match.value.contains("￥") ||
@@ -131,7 +133,7 @@ object AutoBillParser {
         }.maxByOrNull { it.second }?.first
             ?: return null
 
-        val isIncome = incomeKeywords.any { text.contains(it) } ||
+        val isIncome = incomeKeywords.any { text.contains(it, ignoreCase = true) } ||
             lower.contains("received") || lower.contains("income")
         val type = if (isIncome) "INCOME" else "EXPENSE"
         val category = inferCategory(text, isIncome)
@@ -165,4 +167,14 @@ object AutoBillParser {
             else -> "其他支出"
         }
     }
+}
+
+object AutoBillKeywords {
+    val expense = listOf("消费", "支付", "付款", "扣款", "支出", "已花", "买入")
+    val income = listOf("收款", "收入", "到账", "转入", "入账", "红包", "提现")
+    val noise = listOf(
+        "活动", "优惠", "广告", "推广", "新闻", "资讯", "文章", "法院", "案例",
+        "拒绝", "返还", "概不负责", "点击", "详情", "领取", "中奖", "抽奖", "招聘",
+        "报名", "分享", "推送", "促销", "贷款广告"
+    )
 }

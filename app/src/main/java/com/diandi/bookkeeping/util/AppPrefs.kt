@@ -7,6 +7,9 @@ import java.io.File
 object AppPrefs {
     private const val FILE_NOTIFY = "keepalive_notify_enabled"
     private const val FILE_AUTO_BILL = "auto_bill_enabled"
+    private const val FILE_AUTO_BILL_APPS = "auto_bill_allowed_apps"
+    private const val FILE_AUTO_BILL_KEYWORDS_ALLOW = "auto_bill_keywords_allow"
+    private const val FILE_AUTO_BILL_KEYWORDS_BLOCK = "auto_bill_keywords_block"
     private const val FILE_AUTO_BILL_SEEN = "auto_bill_seen"
     private const val MAX_SEEN = 240
     private const val DEDUP_WINDOW_MS = 3 * 60 * 1000L
@@ -23,6 +26,12 @@ object AppPrefs {
         File(context.applicationContext.filesDir, FILE_NOTIFY)
     private fun autoBillFile(context: Context): File =
         File(context.applicationContext.filesDir, FILE_AUTO_BILL)
+    private fun allowedAppsFile(context: Context): File =
+        File(context.applicationContext.filesDir, FILE_AUTO_BILL_APPS)
+    private fun allowKeywordsFile(context: Context): File =
+        File(context.applicationContext.filesDir, FILE_AUTO_BILL_KEYWORDS_ALLOW)
+    private fun blockKeywordsFile(context: Context): File =
+        File(context.applicationContext.filesDir, FILE_AUTO_BILL_KEYWORDS_BLOCK)
     private fun seenFile(context: Context): File =
         File(context.applicationContext.filesDir, FILE_AUTO_BILL_SEEN)
 
@@ -41,6 +50,42 @@ object AppPrefs {
 
     fun setAutoBillEnabled(context: Context, enabled: Boolean) {
         autoBillFile(context).writeText(if (enabled) "1" else "0")
+    }
+
+    fun getAutoBillAllowedApps(context: Context): Set<String> =
+        readLines(allowedAppsFile(context))
+
+    fun setAutoBillAllowedApps(context: Context, packages: Set<String>) {
+        writeLines(allowedAppsFile(context), packages)
+    }
+
+    fun isAutoBillAppAllowed(context: Context, packageName: String): Boolean =
+        getAutoBillAllowedApps(context).contains(packageName)
+
+    fun getAutoBillAllowedKeywords(context: Context): List<String> =
+        readLines(allowKeywordsFile(context)).toList()
+
+    fun setAutoBillAllowedKeywords(context: Context, keywords: List<String>) {
+        writeLines(allowKeywordsFile(context), keywords.toSet())
+    }
+
+    fun getAutoBillBlockedKeywords(context: Context): List<String> =
+        readLines(blockKeywordsFile(context)).toList()
+
+    fun setAutoBillBlockedKeywords(context: Context, keywords: List<String>) {
+        writeLines(blockKeywordsFile(context), keywords.toSet())
+    }
+
+    private fun readLines(file: File): Set<String> =
+        file.takeIf { it.exists() }
+            ?.readLines()
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
+
+    private fun writeLines(file: File, values: Set<String>) {
+        file.writeText(values.filter { it.isNotBlank() }.sorted().joinToString("\n"))
     }
 
     @Synchronized

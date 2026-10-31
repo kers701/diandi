@@ -6,6 +6,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,6 +34,25 @@ fun AboutScreen(onBack: () -> Unit) {
     }
     var autoBillOn by remember {
         mutableStateOf(AppPrefs.isAutoBillEnabled(context))
+    }
+    var allowedApps by remember {
+        mutableStateOf(AppPrefs.getAutoBillAllowedApps(context))
+    }
+    var allowedKeywords by remember {
+        mutableStateOf(AppPrefs.getAutoBillAllowedKeywords(context))
+    }
+    var blockedKeywords by remember {
+        mutableStateOf(AppPrefs.getAutoBillBlockedKeywords(context))
+    }
+    var allowKeywordInput by remember { mutableStateOf("") }
+    var blockKeywordInput by remember { mutableStateOf("") }
+    var showAppPicker by remember { mutableStateOf(false) }
+    var draftAllowedApps by remember { mutableStateOf(emptySet<String>()) }
+    val installedApps = remember(context) {
+        context.packageManager
+            .getInstalledApplications(PackageManager.GET_META_DATA)
+            .filter { it.packageName != context.packageName }
+            .sortedBy { it.loadLabel(context.packageManager).toString().lowercase() }
     }
 
     Scaffold(
@@ -149,6 +172,72 @@ fun AboutScreen(onBack: () -> Unit) {
                 }
             }
 
+            Text("应用白名单", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "必须至少选择一个应用，只有白名单应用的通知才会被识别。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(
+                onClick = {
+                    draftAllowedApps = allowedApps.toSet()
+                    showAppPicker = true
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (allowedApps.isEmpty()) "选择白名单应用" else "已选择 ${allowedApps.size} 个应用")
+            }
+            if (allowedApps.isEmpty()) {
+                Text(
+                    "当前未选择应用，自动记账不会记录任何通知。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            KeywordEditor(
+                title = "自定义白名单关键词",
+                description = "除预设关键词外，包含这些词的通知也会进入金额识别。",
+                keywords = allowedKeywords,
+                input = allowKeywordInput,
+                onInputChange = { allowKeywordInput = it },
+                onAdd = {
+                    val keyword = allowKeywordInput.trim()
+                    if (keyword.isNotBlank() && keyword !in allowedKeywords) {
+                        val next = (allowedKeywords + keyword).distinct()
+                        AppPrefs.setAutoBillAllowedKeywords(context, next)
+                        allowedKeywords = next
+                        allowKeywordInput = ""
+                    }
+                },
+                onRemove = { keyword ->
+                    val next = allowedKeywords - keyword
+                    AppPrefs.setAutoBillAllowedKeywords(context, next)
+                    allowedKeywords = next
+                }
+            )
+            KeywordEditor(
+                title = "自定义黑名单关键词",
+                description = "命中这些词的通知会直接忽略；与白名单冲突时黑名单优先。",
+                keywords = blockedKeywords,
+                input = blockKeywordInput,
+                onInputChange = { blockKeywordInput = it },
+                onAdd = {
+                    val keyword = blockKeywordInput.trim()
+                    if (keyword.isNotBlank() && keyword !in blockedKeywords) {
+                        val next = (blockedKeywords + keyword).distinct()
+                        AppPrefs.setAutoBillBlockedKeywords(context, next)
+                        blockedKeywords = next
+                        blockKeywordInput = ""
+                    }
+                },
+                onRemove = { keyword ->
+                    val next = blockedKeywords - keyword
+                    AppPrefs.setAutoBillBlockedKeywords(context, next)
+                    blockedKeywords = next
+                }
+            )
+
             HorizontalDivider()
             Text(
                 "开源仓库：github.com/kers701/diandi\n数据仅存本机，卸载即清除。",
@@ -158,6 +247,62 @@ fun AboutScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(24.dp))
         }
     }
+
+    if (showAppPicker) {
+        AlertDialog(
+            onDismissRequest = { showAppPicker = false },
+            title = { Text("选择白名单应用") },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(installedApps, key = { it.packageName }) { app ->
+                        val selected = app.packageName in draftAllowedApps
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    draftAllowedApps = if (selected) {
+                                        draftAllowedApps - app.packageName
+                                    } else {
+                                        draftAllowedApps + app.packageName
+                                    }
+                                }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = selected,
+                                onCheckedChange = { checked ->
+                                    draftAllowedApps = if (checked) {
+                                        draftAllowedApps + app.packageName
+                                    } else {
+                                        draftAllowedApps - app.packageName
+                                    }
+                                }
+                            )
+                            Column(Modifier.padding(start = 8.dp)) {
+                                Text(app.loadLabel(context.packageManager).toString())
+                                Text(
+                                    app.packageName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    AppPrefs.setAutoBillAllowedApps(context, draftAllowedApps)
+                    allowedApps = draftAllowedApps
+                    showAppPicker = false
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAppPicker = false }) { Text("取消") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -166,5 +311,45 @@ private fun HelpLine(title: String, body: String) {
         Text(title, fontWeight = FontWeight.Medium)
         Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(4.dp))
+    }
+}
+
+@Composable
+private fun KeywordEditor(
+    title: String,
+    description: String,
+    keywords: List<String>,
+    input: String,
+    onInputChange: (String) -> Unit,
+    onAdd: () -> Unit,
+    onRemove: (String) -> Unit
+) {
+    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = input,
+            onValueChange = onInputChange,
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            placeholder = { Text("输入关键词") }
+        )
+        Spacer(Modifier.width(8.dp))
+        Button(onClick = onAdd, enabled = input.isNotBlank()) { Text("添加") }
+    }
+    if (keywords.isNotEmpty()) {
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp, max = 56.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(keywords, key = { it }) { keyword ->
+                AssistChip(
+                    onClick = { onRemove(keyword) },
+                    label = { Text("$keyword ×") }
+                )
+            }
+        }
     }
 }
