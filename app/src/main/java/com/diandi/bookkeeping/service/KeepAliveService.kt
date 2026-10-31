@@ -47,7 +47,7 @@ class KeepAliveService : Service() {
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "diandi:fgs")
             .apply { setReferenceCounted(false) }
         createChannel()
-        startFg(buildNotification("加载中…", 0))
+        startFg(buildNotification("点滴记账", "加载中…", 0))
         acquireWake()
         handler.post(refreshRunnable)
     }
@@ -113,13 +113,13 @@ class KeepAliveService : Service() {
     }
 
     private fun updateNotification() {
-        val (text, progress) = computeProgressText()
-        val n = buildNotification(text, progress)
+        val (title, text, progress) = computeProgressText()
+        val n = buildNotification(title, text, progress)
         startFg(n)
         getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, n)
     }
 
-    private fun computeProgressText(): Pair<String, Int> {
+    private fun computeProgressText(): Triple<String, String, Int> {
         return try {
             val dao = AppDatabase.getInstance(applicationContext).transactionDao()
             val (balance, targetSum) = runBlocking {
@@ -143,13 +143,18 @@ class KeepAliveService : Service() {
             } else {
                 "余额 ¥${bal2} · 点击记一笔"
             }
-            text to pct.toInt().coerceIn(0, 100)
+            val title = if (targetSum > 0) {
+                "点滴记账 · 攒钱 ${pctStr}%"
+            } else {
+                "点滴记账"
+            }
+            Triple(title, text, pct.toInt().coerceIn(0, 100))
         } catch (_: Exception) {
-            "点滴记账 · 点击记一笔" to 0
+            Triple("点滴记账", "点滴记账 · 点击记一笔", 0)
         }
     }
 
-    private fun buildNotification(content: String, progress: Int): Notification {
+    private fun buildNotification(title: String, content: String, progress: Int): Notification {
         val openQuick = PendingIntent.getActivity(
             this, 0,
             Intent(this, QuickAddActivity::class.java).apply {
@@ -163,7 +168,7 @@ class KeepAliveService : Service() {
         )
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_save)
-            .setContentTitle("点滴记账")
+            .setContentTitle(title)
             .setContentText(content)
             .setStyle(NotificationCompat.BigTextStyle().bigText(content))
             .setContentIntent(openQuick)
