@@ -9,6 +9,7 @@ import com.diandi.bookkeeping.util.AppPrefs
 import java.time.LocalDate
 import java.util.Locale
 import java.util.concurrent.CancellationException
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -90,16 +91,44 @@ object AutoBillParser {
     private val expenseKeywords = listOf("消费", "支付", "付款", "扣款", "支出", "已花", "买入")
     private val incomeKeywords = listOf("收款", "收入", "到账", "转入", "入账", "红包", "提现")
     private val paymentKeywords = expenseKeywords + incomeKeywords
+    private val noiseKeywords = listOf(
+        "活动", "优惠", "广告", "推广", "新闻", "资讯", "文章", "法院", "案例",
+        "拒绝", "返还", "概不负责", "点击", "详情", "领取", "中奖", "抽奖", "招聘",
+        "报名", "分享", "推送", "促销", "贷款广告"
+    )
 
     fun parse(content: String): ParsedAutoBill? {
         val text = content.replace('\n', ' ').trim()
         val lower = text.lowercase(Locale.ROOT)
+        // 新闻、营销文案通常很长且包含多个无关金额，不能当作交易通知处理。
+        if (text.length > 220 || noiseKeywords.any { text.contains(it) }) return null
         if (paymentKeywords.none { text.contains(it) } && !lower.contains("payment") && !lower.contains("received")) {
             return null
         }
-        val amount = amountRegex.findAll(text)
-            .mapNotNull { it.groupValues.getOrNull(1)?.replace(",", "")?.toDoubleOrNull() }
-            .firstOrNull { it > 0.0 && it < 100_000_000.0 }
+        val amount = amountRegex.findAll(text).mapNotNull { match ->
+            val value = match.groupValues.getOrNull(1)?.replace(",", "")?.toDoubleOrNull()
+                ?: return@mapNotNull null
+            if (value <= 0.0 || value >= 100_000_000.0) return@mapNotNull null
+
+            val nearbyStart = (match.range.first - 28).coerceAtLeast(0)
+            val nearbyEnd = (match.range.last + 29).coerceAtMost(text.length)
+            val nearby = text.substring(nearbyStart, nearbyEnd)
+            val hasTransactionKeyword = paymentKeywords.any { nearby.contains(it) } ||
+                nearby.lowercase(Locale.ROOT).let {
+                    it.contains("payment") || it.contains("received") || it.contains("income")
+                }
+            if (!hasTransactionKeyword) return@mapNotNull null
+
+            val distance = paymentKeywords.mapNotNull { keyword ->
+                val index = text.indexOf(keyword, nearbyStart)
+                if (index in nearbyStart until nearbyEnd) abs(index - match.range.first) else null
+            }.minOrNull() ?: 99
+            val hasCurrency = match.value.contains("¥") || match.value.contains("￥") ||
+                match.value.contains("RMB", ignoreCase = true) || match.value.contains("人民币")
+            val followedByYuan = match.range.last + 1 < text.length && text[match.range.last + 1] == '元'
+            val score = 100 - distance + if (hasCurrency) 10 else 0 + if (followedByYuan) 4 else 0
+            value to score
+        }.maxByOrNull { it.second }?.first
             ?: return null
 
         val isIncome = incomeKeywords.any { text.contains(it) } ||
