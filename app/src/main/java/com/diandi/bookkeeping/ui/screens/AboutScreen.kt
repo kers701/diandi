@@ -112,7 +112,7 @@ fun AboutScreen(onBack: () -> Unit) {
 
             Text("自动记账", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "读取已授权的消费、支付、收款和收入通知，识别金额后自动生成账单。仅处理包含收支关键词的通知，数据仍只保存在本机。",
+                "读取已授权的消费、支付、收款和收入通知，识别金额后自动生成账单。不同应用在 3 分钟内出现相同金额和收支类型时只记录一次，可避免支付通知与银行卡短信重复记账。数据仍只保存在本机。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

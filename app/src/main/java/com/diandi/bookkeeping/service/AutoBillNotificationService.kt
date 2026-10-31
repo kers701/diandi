@@ -28,7 +28,14 @@ class AutoBillNotificationService : NotificationListenerService() {
         val content = notificationText(sbn) ?: return
         val parsed = AutoBillParser.parse(content) ?: return
         val fingerprint = AutoBillParser.fingerprint(sbn, content, parsed.amount)
-        if (!AppPrefs.rememberAutoBillNotification(this, fingerprint)) return
+        if (!AppPrefs.rememberAutoBillNotification(
+                this,
+                fingerprint,
+                parsed.amount,
+                parsed.type,
+                sbn.packageName
+            )
+        ) return
 
         serviceScope.launch {
             try {
