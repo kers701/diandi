@@ -355,14 +355,15 @@ fun HomeScreen(
         FilterBottomSheet(
             current = filter,
             onDismiss = { showFilterSheet = false },
-            onApply = { y, m, d ->
+            onApply = { y, m, d, selectedType ->
                 viewModel.updateFilter(
                     year = null,
                     month = null,
                     day = null,
                     startDate = y,
                     endDate = m,
-                    categories = d
+                    categories = d,
+                    type = selectedType
                 )
                 showFilterSheet = false
             }
@@ -466,11 +467,12 @@ fun TransactionItem(tx: Transaction, onDelete: () -> Unit) {
 fun FilterBottomSheet(
     current: com.diandi.bookkeeping.viewmodel.FilterState,
     onDismiss: () -> Unit,
-    onApply: (startDate: LocalDate?, endDate: LocalDate?, categories: Set<String>) -> Unit
+    onApply: (startDate: LocalDate?, endDate: LocalDate?, categories: Set<String>, type: String?) -> Unit
 ) {
     var startDate by remember { mutableStateOf(current.startDate) }
     var endDate by remember { mutableStateOf(current.endDate) }
     var categories by remember { mutableStateOf(current.categories) }
+    var selectedType by remember { mutableStateOf(current.type) }
     var showDatePicker by remember { mutableStateOf(false) }
     var selectingStart by remember { mutableStateOf(true) }
     var showCategoryPicker by remember { mutableStateOf(false) }
@@ -482,6 +484,19 @@ fun FilterBottomSheet(
         Column(Modifier.padding(24.dp)) {
             Text("按时间 / 类别筛选", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(16.dp))
+            Text("收支类型", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TypeChip("全部", selectedType == null, MaterialTheme.colorScheme.primary) {
+                    selectedType = null
+                }
+                TypeChip("支出", selectedType == "EXPENSE", Color(0xFFD32F2F)) {
+                    selectedType = "EXPENSE"
+                }
+                TypeChip("收入", selectedType == "INCOME", Color(0xFF388E3C)) {
+                    selectedType = "INCOME"
+                }
+            }
+            Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = {
@@ -523,7 +538,7 @@ fun FilterBottomSheet(
             Spacer(Modifier.height(20.dp))
             Button(
                 onClick = {
-                    onApply(startDate, endDate, categories)
+                    onApply(startDate, endDate, categories, selectedType)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !invalidRange
@@ -568,7 +583,11 @@ fun FilterBottomSheet(
             onDismissRequest = { showCategoryPicker = false },
             title = { Text("选择大类") },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     allCategories.forEach { category ->
                         Row(
                             modifier = Modifier

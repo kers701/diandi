@@ -3,6 +3,7 @@ package com.diandi.bookkeeping.ui.screens
 import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
@@ -52,9 +53,15 @@ fun AboutScreen(onBack: () -> Unit) {
     var draftAllowedApps by remember { mutableStateOf(emptySet<String>()) }
     var appSearchQuery by remember { mutableStateOf("") }
     val installedApps = remember(context) {
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         context.packageManager
-            .getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { it.packageName != context.packageName }
+            .queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
+            .mapNotNull { it.activityInfo?.applicationInfo }
+            .filter {
+                it.packageName != context.packageName &&
+                    it.flags and ApplicationInfo.FLAG_SYSTEM == 0
+            }
+            .distinctBy { it.packageName }
             .sortedBy { it.loadLabel(context.packageManager).toString().lowercase() }
     }
 
