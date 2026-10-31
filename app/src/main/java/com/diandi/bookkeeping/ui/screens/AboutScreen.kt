@@ -154,7 +154,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     onCheckedChange = { enabled ->
                         autoBillOn = enabled
                         AppPrefs.setAutoBillEnabled(context, enabled)
-                        if (enabled) {
+                        if (enabled && !isAutoBillNotificationAccessGranted(context)) {
                             openAutoBillPermissionSettings(context)
                         }
                     }
@@ -331,6 +331,26 @@ fun AboutScreen(onBack: () -> Unit) {
                 TextButton(onClick = { showAppPicker = false }) { Text("取消") }
             }
         )
+    }
+}
+
+
+private fun isAutoBillNotificationAccessGranted(context: android.content.Context): Boolean {
+    val flat = Settings.Secure.getString(
+        context.contentResolver,
+        "enabled_notification_listeners"
+    ) ?: return false
+    val cn = ComponentName(context, AutoBillNotificationService::class.java)
+    val targets = setOf(
+        cn.flattenToString(),
+        cn.packageName + "/" + cn.className,
+        cn.packageName + "/" + cn.shortClassName
+    )
+    return flat.split(':').any { entry ->
+        val e = entry.trim()
+        targets.any { t -> e.equals(t, ignoreCase = true) } ||
+            e.endsWith("/" + cn.className, ignoreCase = true) ||
+            e.endsWith("/" + cn.shortClassName, ignoreCase = true)
     }
 }
 
