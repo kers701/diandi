@@ -87,10 +87,29 @@ data class ParsedAutoBill(
 )
 
 object AutoBillParser {
-    private val amountRegex = Regex(
-        "(?<![\\d.])(?:¥|￥|RMB|人民币)?\\s*([0-9]{1,9}(?:,[0-9]{3})*(?:\\.[0-9]{1,2})?)(?![\\d.])",
+    /** 优先匹配「数字+元」，避免把时间、卡号当成金额 */
+    private val yuanAmountRegex = Regex(
+        "(?<![\\d.])([0-9]{1,9}(?:,[0-9]{3})*(?:\\.[0-9]{1,2})?)\\s*元"
+    )
+    private val currencyAmountRegex = Regex(
+        "(?:¥|￥|RMB|人民币)\\s*([0-9]{1,9}(?:,[0-9]{3})*(?:\\.[0-9]{1,2})?)",
         RegexOption.IGNORE_CASE
     )
+
+    /**
+     * 账户间互转 / 充值提现（不改变真实消费，不记账）。
+     * 例：银行卡支出(充值财付通-微信零钱充值账户)
+     */
+    private val skipTransferHints = listOf(
+        "充值财付通", "财付通-微信", "微信零钱充值", "零钱充值账户", "零钱充值",
+        "充值到微信", "充值到支付宝", "充值支付宝", "支付宝充值", "微信充值",
+        "转入零钱", "转入微信", "转入支付宝", "转到零钱", "转到微信",
+        "余额宝转入", "余额宝转出", "理财转入", "理财转出",
+        "信用卡还款", "还信用卡", "还款成功",
+        "本人账户", "关联账户", "资金划转", "内部转账",
+        "快捷支付充值", "支付账户充值"
+    )
+
     fun parse(content: String, context: android.content.Context): ParsedAutoBill? {
         val text = content.replace('\n', ' ').trim()
         val lower = text.lowercase(Locale.ROOT)
@@ -98,51 +117,104 @@ object AutoBillParser {
         val incomeKeywords = AutoBillKeywords.income
         val paymentKeywords = expenseKeywords + incomeKeywords
         val blockedKeywords = AutoBillKeywords.noise + AppPrefs.getAutoBillBlockedKeywords(context)
-        // 黑名单先判断，和白名单或预设关键词冲突时始终以黑名单为准。
+
         if (blockedKeywords.any { text.contains(it, ignoreCase = true) }) return null
-        // 新闻、营销文案通常很长且包含多个无关金额，不能当作交易通知处理。
+        // 银行卡↔微信/支付宝等互转、充值提现：不记收支
+        if (skipTransferHints.any { text.contains(it, ignoreCase = true) }) return null
         if (text.length > 220) return null
         if (paymentKeywords.none { text.contains(it, ignoreCase = true) } &&
             !lower.contains("payment") && !lower.contains("received")
         ) {
             return null
         }
-        val amount = amountRegex.findAll(text).mapNotNull { match ->
-            val value = match.groupValues.getOrNull(1)?.replace(",", "")?.toDoubleOrNull()
-                ?: return@mapNotNull null
-            if (value <= 0.0 || value >= 100_000_000.0) return@mapNotNull null
 
-            val nearbyStart = (match.range.first - 28).coerceAtLeast(0)
-            val nearbyEnd = (match.range.last + 29).coerceAtMost(text.length)
-            val nearby = text.substring(nearbyStart, nearbyEnd)
-            val hasTransactionKeyword = paymentKeywords.any { nearby.contains(it, ignoreCase = true) } ||
-                nearby.lowercase(Locale.ROOT).let {
-                    it.contains("payment") || it.contains("received") || it.contains("income")
-                }
-            if (!hasTransactionKeyword) return@mapNotNull null
-
-            val distance = paymentKeywords.mapNotNull { keyword ->
-                val index = text.indexOf(keyword, nearbyStart, ignoreCase = true)
-                if (index in nearbyStart until nearbyEnd) abs(index - match.range.first) else null
-            }.minOrNull() ?: 99
-            val hasCurrency = match.value.contains("¥") || match.value.contains("￥") ||
-                match.value.contains("RMB", ignoreCase = true) || match.value.contains("人民币")
-            val followedByYuan = match.range.last + 1 < text.length && text[match.range.last + 1] == '元'
-            val score = 100 - distance + if (hasCurrency) 10 else 0 + if (followedByYuan) 4 else 0
-            value to score
-        }.maxByOrNull { it.second }?.first
-            ?: return null
+        val amount = pickAmount(text, paymentKeywords) ?: return null
 
         val isIncome = incomeKeywords.any { text.contains(it, ignoreCase = true) } ||
             lower.contains("received") || lower.contains("income")
-        val type = if (isIncome) "INCOME" else "EXPENSE"
-        val category = inferCategory(text, isIncome)
+        // 「支出」优先于模糊的「转入」等（银行短信里支出括号内常有充值描述）
+        val isExpenseStrong = AutoBillKeywords.expense.any { text.contains(it) }
+        val type = when {
+            isExpenseStrong && !incomeKeywords.any { text.contains(it) } -> "EXPENSE"
+            isIncome && !isExpenseStrong -> "INCOME"
+            isIncome -> "INCOME"
+            else -> "EXPENSE"
+        }
+        val category = inferCategory(text, type == "INCOME")
         return ParsedAutoBill(
             amount = amount,
             type = type,
             category = category,
             note = "通知自动记账：${text.take(160)}"
         )
+    }
+
+    /**
+     * 金额选取规则：
+     * 1. 只要带「元」或货币符号的数字
+     * 2. 排除「余额」「可用余额」「账户余额」后的数字
+     * 3. 排除像时间（03:21）、日期、尾号卡号中的片段（无「元」时本来就不会进候选）
+     * 4. 优先靠近「支出/收入/消费…」且带「元」的金额
+     */
+    private fun pickAmount(text: String, paymentKeywords: List<String>): Double? {
+        data class Cand(val value: Double, val start: Int, val end: Int, val score: Int)
+
+        val cands = mutableListOf<Cand>()
+        fun addMatch(match: MatchResult, base: Int) {
+            val raw = match.groupValues.getOrNull(1)?.replace(",", "") ?: return
+            val value = raw.toDoubleOrNull() ?: return
+            if (value <= 0.0 || value >= 100_000_000.0) return
+            val start = match.range.first
+            val end = match.range.last
+            // 落在「余额」关键词之后的一小段 → 账户余额，不是交易额
+            if (isAfterBalanceKeyword(text, start)) return
+            // 像 03:21 里的数字：前一位是冒号或后一位是冒号
+            if (looksLikeTimeFragment(text, match.range, raw)) return
+
+            var score = base
+            val nearbyStart = (start - 36).coerceAtLeast(0)
+            val nearbyEnd = (end + 8).coerceAtMost(text.length)
+            val nearby = text.substring(nearbyStart, nearbyEnd)
+            val distance = paymentKeywords.mapNotNull { keyword ->
+                val index = text.indexOf(keyword, nearbyStart, ignoreCase = true)
+                if (index in nearbyStart until nearbyEnd) abs(index - start) else null
+            }.minOrNull()
+            if (distance != null) score += 40 - distance.coerceAtMost(40)
+            // 紧跟在 支出/消费 等后面的「xx元」加分
+            if (Regex("""(?:支出|消费|支付|付款|扣款|收入|到账|收款)[^元]{0,48}$""").containsMatchIn(
+                    text.substring(0, start.coerceAtMost(text.length))
+                )
+            ) {
+                score += 25
+            }
+            cands += Cand(value, start, end, score)
+        }
+
+        yuanAmountRegex.findAll(text).forEach { addMatch(it, 50) }
+        currencyAmountRegex.findAll(text).forEach { addMatch(it, 45) }
+
+        return cands.maxByOrNull { it.score }?.value
+    }
+
+    private fun isAfterBalanceKeyword(text: String, amountStart: Int): Boolean {
+        val prefix = text.substring(0, amountStart)
+        val keys = listOf("余额", "可用余额", "账户余额", "卡内余额", "活期余额")
+        for (k in keys) {
+            val i = prefix.lastIndexOf(k)
+            if (i >= 0 && amountStart - i <= 12) return true
+        }
+        return false
+    }
+
+    private fun looksLikeTimeFragment(text: String, range: IntRange, raw: String): Boolean {
+        // 仅纯整数且长度 1–2 时检查是否落在 HH:MM
+        if (raw.contains('.') || raw.length > 2) return false
+        val before = if (range.first > 0) text[range.first - 1] else ' '
+        val after = if (range.last + 1 < text.length) text[range.last + 1] else ' '
+        if (before == ':' || after == ':') return true
+        // 11月1日 中的日、月数字无「元」不会进入 yuan 候选；此处兜底
+        if (after == '月' || after == '日' || before == '月') return true
+        return false
     }
 
     fun fingerprint(sbn: StatusBarNotification, content: String, amount: Double): String {
@@ -163,7 +235,7 @@ object AutoBillParser {
             listOf("餐饮", "吃饭", "美团", "饿了么", "外卖", "餐厅").any { text.contains(it) } -> "餐饮"
             listOf("淘宝", "天猫", "京东", "购物", "商品", "拼多多").any { text.contains(it) } -> "购物"
             listOf("滴滴", "打车", "地铁", "公交", "交通", "加油").any { text.contains(it) } -> "交通"
-            listOf("水费", "电费", "燃气", "话费", "充值").any { text.contains(it) } -> "生活缴费"
+            listOf("水费", "电费", "燃气", "话费").any { text.contains(it) } -> "生活缴费"
             else -> "其他支出"
         }
     }
