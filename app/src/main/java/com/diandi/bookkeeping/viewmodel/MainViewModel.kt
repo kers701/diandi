@@ -17,7 +17,10 @@ data class FilterState(
     val day: Int? = null,
     val type: String? = null,       // null / EXPENSE / INCOME
     val category: String? = null,
-    val tagQuery: String = ""
+    val tagQuery: String = "",
+    val startDate: LocalDate? = null,
+    val endDate: LocalDate? = null,
+    val categories: Set<String> = emptySet()
 )
 
 class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
@@ -27,7 +30,26 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
 
     val transactions: StateFlow<List<Transaction>> = _filter
         .flatMapLatest { f ->
-            repo.getFiltered(f.year, f.month, f.day, f.type, f.category, f.tagQuery)
+            val startDate = f.startDate ?: when {
+                f.year == null -> null
+                f.month == null -> LocalDate.of(f.year, 1, 1)
+                f.day == null -> LocalDate.of(f.year, f.month, 1)
+                else -> LocalDate.of(f.year, f.month, f.day)
+            }
+            val endDate = f.endDate ?: when {
+                f.year == null -> null
+                f.month == null -> LocalDate.of(f.year, 12, 31)
+                f.day == null -> LocalDate.of(f.year, f.month, 1).plusMonths(1).minusDays(1)
+                else -> LocalDate.of(f.year, f.month, f.day)
+            }
+            repo.getFiltered(
+                startDate = startDate?.toString(),
+                endDate = endDate?.toString(),
+                type = f.type,
+                tagQuery = f.tagQuery,
+                categories = f.categories.toList().ifEmpty { listOf("") },
+                categoriesEmpty = if (f.categories.isEmpty()) 1 else 0
+            )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -55,9 +77,14 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         day: Int? = _filter.value.day,
         type: String? = _filter.value.type,
         category: String? = _filter.value.category,
-        tagQuery: String = _filter.value.tagQuery
+        tagQuery: String = _filter.value.tagQuery,
+        startDate: LocalDate? = _filter.value.startDate,
+        endDate: LocalDate? = _filter.value.endDate,
+        categories: Set<String> = _filter.value.categories
     ) {
-        _filter.value = FilterState(year, month, day, type, category, tagQuery)
+        _filter.value = FilterState(
+            year, month, day, type, category, tagQuery, startDate, endDate, categories
+        )
     }
 
     fun clearFilter() {

@@ -46,14 +46,17 @@ fun ChartsScreen(
     var period by remember { mutableStateOf("month") }
     var chartType by remember { mutableStateOf("line") }
     var selectedType by remember { mutableStateOf("EXPENSE") }
-    val now = LocalDate.now()
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     val monthlyStats by viewModel.monthlyStats.collectAsState()
+    val dailyStats by viewModel.getDailyStats(selectedDate.year, selectedDate.monthValue)
+        .collectAsState(initial = emptyList())
     val categoryFlow = viewModel.getCategoryDistribution(
         selectedType,
-        if (period != "all") now.year else null,
-        if (period == "month" || period == "day") now.monthValue else null,
-        if (period == "day") now.dayOfMonth else null
+        if (period != "all") selectedDate.year else null,
+        if (period == "month" || period == "day") selectedDate.monthValue else null,
+        if (period == "day") selectedDate.dayOfMonth else null
     )
     val categoryStats by categoryFlow.collectAsState(initial = emptyList())
 
@@ -83,6 +86,9 @@ fun ChartsScreen(
                 TypeChip("按月", period == "month", MaterialTheme.colorScheme.primary) { period = "month" }
                 TypeChip("按日", period == "day", MaterialTheme.colorScheme.primary) { period = "day" }
             }
+            OutlinedButton(onClick = { showDatePicker = true }) {
+                Text("基准日期：$selectedDate")
+            }
 
             Text("图表类型", style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -109,12 +115,27 @@ fun ChartsScreen(
 
             when (chartType) {
                 "line" -> {
-                    Text("支出趋势（按月汇总）", style = MaterialTheme.typography.titleMedium)
-                    if (monthlyStats.isEmpty()) {
+                    val linePoints = when (period) {
+                        "year" -> monthlyStats
+                            .groupBy { it.year }
+                            .toSortedMap()
+                            .map { (year, stats) -> year.toString() to stats.sumOf { it.expense }.toFloat() }
+                        "day" -> dailyStats.map {
+                            "${it.month}-${it.day}" to it.expense.toFloat()
+                        }
+                        else -> monthlyStats.map {
+                            "${it.year}-${it.month}" to it.expense.toFloat()
+                        }
+                    }
+                    Text(
+                        "支出趋势（${when (period) { "year" -> "按年"; "day" -> "按日"; else -> "按月" }}汇总）",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    if (linePoints.isEmpty()) {
                         Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
-                        val labels = monthlyStats.map { "${it.year}-${it.month}" }
-                        val expenses = monthlyStats.map { it.expense.toFloat() }
+                        val labels = linePoints.map { it.first }
+                        val expenses = linePoints.map { it.second }
                         val maxE = (expenses.maxOrNull() ?: 1f).coerceAtLeast(1f)
                         val lineColor = MaterialTheme.colorScheme.primary
                         val labelColor = MaterialTheme.colorScheme.onSurface
@@ -174,8 +195,8 @@ fun ChartsScreen(
                             }
                         }
                         Text(
-                            "最近: " + monthlyStats.takeLast(6).joinToString(" | ") {
-                                "${it.year}-${it.month}: ¥${"%.0f".format(it.expense)}"
+                            "最近: " + linePoints.takeLast(6).joinToString(" | ") {
+                                "${it.first}: ¥${"%.0f".format(it.second)}"
                             },
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -266,6 +287,33 @@ fun ChartsScreen(
                     }
                 }
             }
+        }
+    }
+
+    if (showDatePicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDate
+                .atStartOfDay(java.time.ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        selectedDate = java.time.Instant.ofEpochMilli(millis)
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalDate()
+                    }
+                    showDatePicker = false
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            }
+        ) {
+            DatePicker(state = pickerState)
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.diandi.bookkeeping.ui.screens
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.diandi.bookkeeping.BuildConfig
+import com.diandi.bookkeeping.service.AutoBillNotificationService
 import com.diandi.bookkeeping.service.KeepAliveService
 import com.diandi.bookkeeping.util.AppPrefs
 
@@ -48,6 +50,7 @@ fun AboutScreen(onBack: () -> Unit) {
     var blockKeywordInput by remember { mutableStateOf("") }
     var showAppPicker by remember { mutableStateOf(false) }
     var draftAllowedApps by remember { mutableStateOf(emptySet<String>()) }
+    var appSearchQuery by remember { mutableStateOf("") }
     val installedApps = remember(context) {
         context.packageManager
             .getInstalledApplications(PackageManager.GET_META_DATA)
@@ -150,22 +153,14 @@ fun AboutScreen(onBack: () -> Unit) {
                         autoBillOn = enabled
                         AppPrefs.setAutoBillEnabled(context, enabled)
                         if (enabled) {
-                            try {
-                                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                            } catch (_: Exception) {
-                            }
+                            openAutoBillPermissionSettings(context)
                         }
                     }
                 )
             }
             if (autoBillOn) {
                 OutlinedButton(
-                    onClick = {
-                        try {
-                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        } catch (_: Exception) {
-                        }
-                    },
+                    onClick = { openAutoBillPermissionSettings(context) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("打开通知读取权限设置")
@@ -181,6 +176,7 @@ fun AboutScreen(onBack: () -> Unit) {
             OutlinedButton(
                 onClick = {
                     draftAllowedApps = allowedApps.toSet()
+                    appSearchQuery = ""
                     showAppPicker = true
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -253,8 +249,24 @@ fun AboutScreen(onBack: () -> Unit) {
             onDismissRequest = { showAppPicker = false },
             title = { Text("选择白名单应用") },
             text = {
-                LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                    items(installedApps, key = { it.packageName }) { app ->
+                val filteredApps = installedApps.filter { app ->
+                    val label = app.loadLabel(context.packageManager).toString()
+                    appSearchQuery.isBlank() ||
+                        label.contains(appSearchQuery, ignoreCase = true) ||
+                        app.packageName.contains(appSearchQuery, ignoreCase = true)
+                }
+                Column {
+                    OutlinedTextField(
+                        value = appSearchQuery,
+                        onValueChange = { appSearchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("搜索应用") },
+                        placeholder = { Text("应用名称或包名") }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(Modifier.heightIn(max = 380.dp)) {
+                        items(filteredApps, key = { it.packageName }) { app ->
                         val selected = app.packageName in draftAllowedApps
                         Row(
                             modifier = Modifier
@@ -290,6 +302,7 @@ fun AboutScreen(onBack: () -> Unit) {
                         }
                     }
                 }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -302,6 +315,28 @@ fun AboutScreen(onBack: () -> Unit) {
                 TextButton(onClick = { showAppPicker = false }) { Text("取消") }
             }
         )
+    }
+}
+
+private fun openAutoBillPermissionSettings(context: android.content.Context) {
+    val component = ComponentName(context, AutoBillNotificationService::class.java)
+    try {
+        val detailIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).apply {
+                putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, component)
+            }
+        } else {
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        }
+        context.startActivity(detailIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: Exception) {
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+        }
     }
 }
 

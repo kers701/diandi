@@ -15,21 +15,20 @@ interface TransactionDao {
 
     @Query("""
         SELECT * FROM transactions 
-        WHERE (:year IS NULL OR year = :year)
-          AND (:month IS NULL OR month = :month)
-          AND (:day IS NULL OR day = :day)
+        WHERE (:startDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) >= :startDate)
+          AND (:endDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) <= :endDate)
           AND (:type IS NULL OR type = :type)
-          AND (:category IS NULL OR category = :category)
+          AND (:categoriesEmpty = 1 OR category IN (:categories))
           AND (:tagQuery = '' OR tags LIKE '%' || :tagQuery || '%')
         ORDER BY year DESC, month DESC, day DESC, createdAt DESC
     """)
     fun getFiltered(
-        year: Int?,
-        month: Int?,
-        day: Int?,
+        startDate: String?,
+        endDate: String?,
         type: String?,
-        category: String?,
-        tagQuery: String
+        tagQuery: String,
+        categories: List<String>,
+        categoriesEmpty: Int
     ): Flow<List<Transaction>>
 
     @Insert

@@ -19,6 +19,7 @@ import com.diandi.bookkeeping.ui.components.BalanceCard
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.ui.components.formatMoney
 import com.diandi.bookkeeping.viewmodel.MainViewModel
+import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.AppUpdateChecker
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
@@ -190,34 +191,57 @@ fun HomeScreen(
 
             // 二级时间筛选：年 / 月 / 日
             val today = LocalDate.now()
-            val isAllTime = filter.year == null && filter.month == null && filter.day == null
-            val isThisYear = filter.year == today.year && filter.month == null && filter.day == null
-            val isThisMonth = filter.year == today.year && filter.month == today.monthValue && filter.day == null
-            val isToday = filter.year == today.year && filter.month == today.monthValue && filter.day == today.dayOfMonth
+            val hasDateRange = filter.startDate != null || filter.endDate != null
+            val isAllTime = !hasDateRange && filter.year == null && filter.month == null && filter.day == null
+            val isThisYear = !hasDateRange && filter.year == today.year && filter.month == null && filter.day == null
+            val isThisMonth = !hasDateRange && filter.year == today.year && filter.month == today.monthValue && filter.day == null
+            val isToday = !hasDateRange && filter.year == today.year && filter.month == today.monthValue && filter.day == today.dayOfMonth
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TypeChip("全部", isAllTime, MaterialTheme.colorScheme.tertiary) {
-                    viewModel.updateFilter(year = null, month = null, day = null)
+                    viewModel.updateFilter(
+                        year = null,
+                        month = null,
+                        day = null,
+                        startDate = null,
+                        endDate = null
+                    )
                 }
                 TypeChip("本年", isThisYear, MaterialTheme.colorScheme.tertiary) {
-                    viewModel.updateFilter(year = today.year, month = null, day = null)
+                    viewModel.updateFilter(
+                        year = today.year,
+                        month = null,
+                        day = null,
+                        startDate = null,
+                        endDate = null
+                    )
                 }
                 TypeChip("本月", isThisMonth, MaterialTheme.colorScheme.tertiary) {
-                    viewModel.updateFilter(year = today.year, month = today.monthValue, day = null)
+                    viewModel.updateFilter(
+                        year = today.year,
+                        month = today.monthValue,
+                        day = null,
+                        startDate = null,
+                        endDate = null
+                    )
                 }
                 TypeChip("本日", isToday, MaterialTheme.colorScheme.tertiary) {
                     viewModel.updateFilter(
                         year = today.year,
                         month = today.monthValue,
-                        day = today.dayOfMonth
+                        day = today.dayOfMonth,
+                        startDate = null,
+                        endDate = null
                     )
                 }
             }
 
             Spacer(Modifier.height(8.dp))
 
-            if (filter.year != null || filter.month != null || filter.day != null || filter.category != null) {
+            if (hasDateRange || filter.year != null || filter.month != null || filter.day != null || filter.categories.isNotEmpty()) {
                 Text(
-                    "当前筛选: ${filter.year ?: "年"}年${filter.month?.let { "${it}月" } ?: ""}${filter.day?.let { "${it}日" } ?: ""} ${filter.category ?: ""}",
+                    "当前筛选: ${filter.startDate?.toString() ?: filter.year?.let { "${it}年" } ?: "全部日期"}" +
+                        "${filter.endDate?.let { " 至 $it" } ?: ""}" +
+                        "${filter.categories.takeIf { it.isNotEmpty() }?.joinToString("、")?.let { " · $it" } ?: ""}",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -332,7 +356,14 @@ fun HomeScreen(
             current = filter,
             onDismiss = { showFilterSheet = false },
             onApply = { y, m, d, cat ->
-                viewModel.updateFilter(year = y, month = m, day = d, category = cat)
+                viewModel.updateFilter(
+                    year = null,
+                    month = null,
+                    day = null,
+                    startDate = y,
+                    endDate = m,
+                    categories = d
+                )
                 showFilterSheet = false
             }
         )
@@ -435,64 +466,136 @@ fun TransactionItem(tx: Transaction, onDelete: () -> Unit) {
 fun FilterBottomSheet(
     current: com.diandi.bookkeeping.viewmodel.FilterState,
     onDismiss: () -> Unit,
-    onApply: (year: Int?, month: Int?, day: Int?, category: String?) -> Unit
+    onApply: (startDate: LocalDate?, endDate: LocalDate?, categories: Set<String>) -> Unit
 ) {
-    var year by remember { mutableStateOf(current.year?.toString() ?: "") }
-    var month by remember { mutableStateOf(current.month?.toString() ?: "") }
-    var day by remember { mutableStateOf(current.day?.toString() ?: "") }
-    var category by remember { mutableStateOf(current.category ?: "") }
+    var startDate by remember { mutableStateOf(current.startDate) }
+    var endDate by remember { mutableStateOf(current.endDate) }
+    var categories by remember { mutableStateOf(current.categories) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var selectingStart by remember { mutableStateOf(true) }
+    var showCategoryPicker by remember { mutableStateOf(false) }
+    val allCategories = remember {
+        (Categories.expenseCategories + Categories.incomeCategories).distinct()
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(24.dp)) {
             Text("按时间 / 类别筛选", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = year,
-                    onValueChange = { year = it.filter { c -> c.isDigit() }.take(4) },
-                    label = { Text("年") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = month,
-                    onValueChange = { month = it.filter { c -> c.isDigit() }.take(2) },
-                    label = { Text("月") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = day,
-                    onValueChange = { day = it.filter { c -> c.isDigit() }.take(2) },
-                    label = { Text("日") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
+                OutlinedButton(
+                    onClick = {
+                        selectingStart = true
+                        showDatePicker = true
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(startDate?.toString() ?: "开始日期")
+                }
+                OutlinedButton(
+                    onClick = {
+                        selectingStart = false
+                        showDatePicker = true
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(endDate?.toString() ?: "结束日期")
+                }
             }
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = category,
-                onValueChange = { category = it },
-                label = { Text("大类（可选）") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                placeholder = { Text("如：餐饮、烟酒…") }
-            )
+            TextButton(
+                onClick = {
+                    startDate = null
+                    endDate = null
+                }
+            ) { Text("清除日期") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { showCategoryPicker = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (categories.isEmpty()) "选择大类（可多选）" else "已选大类：${categories.joinToString("、")}")
+            }
+            TextButton(onClick = { categories = emptySet() }) { Text("清除大类") }
+            val invalidRange = startDate != null && endDate != null && endDate!!.isBefore(startDate)
+            if (invalidRange) {
+                Text("结束日期不能早于开始日期", color = MaterialTheme.colorScheme.error)
+            }
             Spacer(Modifier.height(20.dp))
             Button(
                 onClick = {
-                    onApply(
-                        year.toIntOrNull(),
-                        month.toIntOrNull(),
-                        day.toIntOrNull(),
-                        category.ifBlank { null }
-                    )
+                    onApply(startDate, endDate, categories)
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !invalidRange
             ) {
                 Text("应用筛选")
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showDatePicker) {
+        val initialDate = if (selectingStart) startDate ?: LocalDate.now() else endDate ?: startDate ?: LocalDate.now()
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = initialDate
+                .atStartOfDay(java.time.ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        val date = java.time.Instant.ofEpochMilli(millis)
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalDate()
+                        if (selectingStart) startDate = date else endDate = date
+                    }
+                    showDatePicker = false
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+
+    if (showCategoryPicker) {
+        AlertDialog(
+            onDismissRequest = { showCategoryPicker = false },
+            title = { Text("选择大类") },
+            text = {
+                Column {
+                    allCategories.forEach { category ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    categories = if (category in categories) {
+                                        categories - category
+                                    } else {
+                                        categories + category
+                                    }
+                                },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = category in categories,
+                                onCheckedChange = { checked ->
+                                    categories = if (checked) categories + category else categories - category
+                                }
+                            )
+                            Text(category)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCategoryPicker = false }) { Text("完成") }
+            }
+        )
     }
 }

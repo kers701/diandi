@@ -12,13 +12,13 @@ class BookkeepingRepository(private val dao: TransactionDao) {
     fun getAllTransactions() = dao.getAllTransactions()
 
     fun getFiltered(
-        year: Int? = null,
-        month: Int? = null,
-        day: Int? = null,
+        startDate: String? = null,
+        endDate: String? = null,
         type: String? = null,
-        category: String? = null,
-        tagQuery: String = ""
-    ) = dao.getFiltered(year, month, day, type, category, tagQuery)
+        tagQuery: String = "",
+        categories: List<String> = listOf(""),
+        categoriesEmpty: Int = 1
+    ) = dao.getFiltered(startDate, endDate, type, tagQuery, categories, categoriesEmpty)
 
     suspend fun addTransaction(tx: Transaction) = dao.insert(tx)
     suspend fun updateTransaction(tx: Transaction) = dao.update(tx)
