@@ -27,6 +27,8 @@ import com.diandi.bookkeeping.BuildConfig
 import com.diandi.bookkeeping.service.AutoBillNotificationService
 import com.diandi.bookkeeping.service.KeepAliveService
 import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.util.InstalledAppsHelper
+import com.diandi.bookkeeping.util.LauncherAppInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,7 +55,7 @@ fun AboutScreen(onBack: () -> Unit) {
     var draftAllowedApps by remember { mutableStateOf(emptySet<String>()) }
     var appSearchQuery by remember { mutableStateOf("") }
     // 与 wallpaper_app 相同：全部可启动应用（含系统预装），不按 FLAG_SYSTEM 剔除
-    val installedApps = remember(context) {
+    val installedApps: List<LauncherAppInfo> = remember(context) {
         InstalledAppsHelper.listLaunchableApps(context)
     }
 
@@ -264,7 +266,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "${filteredApps.size} / ${installedApps.size}",
+                        filteredApps.size.toString() + " / " + installedApps.size.toString(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -297,7 +299,7 @@ fun AboutScreen(onBack: () -> Unit) {
                             )
                             Column(Modifier.padding(start = 8.dp)) {
                                 Text(
-                                    if (app.isSystem) "${app.label}（系统）" else app.label
+                                    if (app.isSystem) (app.label + "（系统）") else app.label
                                 )
                                 Text(
                                     app.packageName,
