@@ -355,7 +355,7 @@ fun HomeScreen(
         FilterBottomSheet(
             current = filter,
             onDismiss = { showFilterSheet = false },
-            onApply = { y, m, d, cat ->
+            onApply = { y, m, d ->
                 viewModel.updateFilter(
                     year = null,
                     month = null,
