@@ -1,5 +1,8 @@
 package com.diandi.bookkeeping.service
 
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.text.TextUtils
@@ -56,6 +59,15 @@ class AutoBillNotificationService : NotificationListenerService() {
                         day = now.dayOfMonth
                     )
                 )
+                val amountText = if (parsed.amount == parsed.amount.toLong().toDouble()) {
+                    parsed.amount.toLong().toString()
+                } else {
+                    String.format(Locale.CHINA, "%.2f", parsed.amount)
+                }
+                val msg = "已自动记账，金额" + amountText
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+                }
             } catch (_: Exception) {
                 // 单条通知解析或数据库异常不应影响监听服务继续工作。
             }
