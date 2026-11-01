@@ -431,10 +431,7 @@ fun HomeScreen(
                                 Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
                             ) {
                                 Text(
-                                    highlightMoneyAmounts(
-                                        smartAnalysisResult,
-                                        MaterialTheme.colorScheme.primary
-                                    ),
+                                    highlightMoneyAmounts(smartAnalysisResult),
                                     modifier = Modifier.pointerInput(smartAnalysisResult) {
                                         detectTapGestures(onDoubleTap = {
                                             showCopyAnalysisConfirm = true
@@ -890,13 +887,13 @@ private fun HomeCategoryChart(
 
 private val MONEY_AMOUNT_PATTERN = Regex("""[¥￥]\s*[+-]?\d[\d,]*(?:\.\d+)?|[+-]?\d[\d,]*(?:\.\d+)?\s*(?:元|块)""")
 
-private fun highlightMoneyAmounts(text: String, amountColor: Color): AnnotatedString = buildAnnotatedString {
+private fun highlightMoneyAmounts(text: String): AnnotatedString = buildAnnotatedString {
     var cursor = 0
     MONEY_AMOUNT_PATTERN.findAll(text).forEach { match ->
         val start = match.range.first
         if (start >= cursor) {
             append(text.substring(cursor, start))
-            withStyle(SpanStyle(color = amountColor, fontWeight = FontWeight.SemiBold)) {
+            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
                 append(match.value)
             }
             cursor = match.range.last + 1
