@@ -153,7 +153,7 @@ object AutoBillParser {
             isIncome -> "INCOME"
             else -> "EXPENSE"
         }
-        val category = inferCategory(text, type == "INCOME")
+        val category = inferCategory(context, text, type == "INCOME")
         return ParsedAutoBill(
             amount = amount,
             type = type,
