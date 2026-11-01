@@ -69,9 +69,44 @@ fun HomeScreen(
     var updateMsg by remember { mutableStateOf<String?>(null) }
     var updateInfo by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
     var downloading by remember { mutableStateOf(false) }
+    var updateCheckRequest by remember { mutableIntStateOf(0) }
+    var automaticUpdateCheck by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val balanceAccent = balanceAccentColor(balance)
     val balanceBackground = balanceAccent.copy(alpha = 0.07f)
+
+    LaunchedEffect(Unit) {
+        updateCheckRequest++
+    }
+    LaunchedEffect(updateCheckRequest) {
+        if (updateCheckRequest == 0) return@LaunchedEffect
+        val isAutomaticCheck = automaticUpdateCheck
+        if (!isAutomaticCheck) {
+            checkUpdate = true
+            updateMsg = "正在检查…"
+            updateInfo = null
+        }
+        val result = withContext(Dispatchers.IO) { AppUpdateChecker.checkLatest() }
+        when (result) {
+            is AppUpdateChecker.CheckResult.UpdateAvailable -> {
+                updateInfo = result.info
+                updateMsg = "发现新版本 ${result.info.versionName}"
+                checkUpdate = true
+            }
+            is AppUpdateChecker.CheckResult.UpToDate -> {
+                if (!isAutomaticCheck) {
+                    updateMsg = "已是最新版 ${result.current}"
+                    checkUpdate = true
+                }
+            }
+            is AppUpdateChecker.CheckResult.Failed -> {
+                if (!isAutomaticCheck) {
+                    updateMsg = "检查失败：${result.message}"
+                    checkUpdate = true
+                }
+            }
+        }
+    }
 
     Scaffold(
         containerColor = balanceBackground,
@@ -103,7 +138,10 @@ fun HomeScreen(
                     IconButton(onClick = onCorrectionClick) {
                         Icon(Icons.Default.AccountBalance, contentDescription = "资金修正")
                     }
-                    IconButton(onClick = { checkUpdate = true }) {
+                    IconButton(onClick = {
+                        automaticUpdateCheck = false
+                        updateCheckRequest++
+                    }) {
                         Icon(Icons.Default.SystemUpdate, contentDescription = "检查更新")
                     }
                     IconButton(onClick = onAboutClick) {
@@ -307,21 +345,6 @@ fun HomeScreen(
 
 
     if (checkUpdate) {
-        LaunchedEffect(Unit) {
-            updateMsg = "正在检查…"
-            updateInfo = null
-            val result = withContext(Dispatchers.IO) { AppUpdateChecker.checkLatest() }
-            when (result) {
-                is AppUpdateChecker.CheckResult.UpToDate ->
-                    updateMsg = "已是最新版 ${result.current}"
-                is AppUpdateChecker.CheckResult.UpdateAvailable -> {
-                    updateInfo = result.info
-                    updateMsg = "发现新版本 ${result.info.versionName}"
-                }
-                is AppUpdateChecker.CheckResult.Failed ->
-                    updateMsg = "检查失败：${result.message}"
-            }
-        }
         AlertDialog(
             onDismissRequest = { checkUpdate = false },
             title = { Text("检查更新") },
