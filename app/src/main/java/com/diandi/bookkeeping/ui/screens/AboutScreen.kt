@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +24,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.diandi.bookkeeping.BuildConfig
 import com.diandi.bookkeeping.service.AutoBillNotificationService
 import com.diandi.bookkeeping.service.KeepAliveService
@@ -34,6 +38,19 @@ import com.diandi.bookkeeping.util.LauncherAppInfo
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var notificationAccessGranted by remember(context) {
+        mutableStateOf(isAutoBillNotificationAccessGranted(context))
+    }
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationAccessGranted = isAutoBillNotificationAccessGranted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     var notifyOn by remember {
         mutableStateOf(AppPrefs.isNotifyEnabled(context))
     }
@@ -154,7 +171,8 @@ fun AboutScreen(onBack: () -> Unit) {
                     onCheckedChange = { enabled ->
                         autoBillOn = enabled
                         AppPrefs.setAutoBillEnabled(context, enabled)
-                        if (enabled && !isAutoBillNotificationAccessGranted(context)) {
+                        notificationAccessGranted = isAutoBillNotificationAccessGranted(context)
+                        if (enabled && !notificationAccessGranted) {
                             openAutoBillPermissionSettings(context)
                         }
                     }
@@ -163,10 +181,15 @@ fun AboutScreen(onBack: () -> Unit) {
             if (autoBillOn) {
                 OutlinedButton(
                     onClick = { openAutoBillPermissionSettings(context) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("打开通知读取权限设置")
-                }
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("打开通知读取权限设置")
+            }
+            Text(
+                if (notificationAccessGranted) "通知读取权限已开启" else "尚未授权：请在系统设置中允许点滴访问通知",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (notificationAccessGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            )
 
             Text("应用白名单", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
@@ -356,24 +379,37 @@ private fun isAutoBillNotificationAccessGranted(context: android.content.Context
 
 private fun openAutoBillPermissionSettings(context: android.content.Context) {
     val component = ComponentName(context, AutoBillNotificationService::class.java)
-    try {
-        val detailIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).apply {
-                putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, component)
-            }
-        } else {
-            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-        }
-        context.startActivity(detailIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (_: Exception) {
-        try {
-            context.startActivity(
-                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    val intents = buildList {
+        // HyperOS 等厂商系统对单应用授权详情深链的处理不一致，先打开通用列表页。
+        add(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            add(
+                Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, component)
+                }
             )
+        }
+        add(Intent(Settings.ACTION_SETTINGS))
+    }
+    intents.forEachIndexed { index, intent ->
+        try {
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            if (index == intents.lastIndex) {
+                Toast.makeText(
+                    context,
+                    "请在设置中搜索“通知访问”或“通知使用权”，找到“点滴自动记账”并允许访问。",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            return
         } catch (_: Exception) {
         }
     }
+    Toast.makeText(
+        context,
+        "无法自动打开授权页。请到系统设置中搜索“通知访问”或“通知使用权”，然后允许“点滴自动记账”。",
+        Toast.LENGTH_LONG
+    ).show()
 }
 
 @Composable
