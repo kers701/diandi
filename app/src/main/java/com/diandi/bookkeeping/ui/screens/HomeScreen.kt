@@ -247,18 +247,20 @@ fun HomeScreen(
                     onSearch = { focusManager.clearFocus(force = true) }
                 ),
                 trailingIcon = {
-                    if (tagSearch.isNotEmpty()) {
-                        IconButton(onClick = {
-                            tagSearch = ""
-                            viewModel.updateFilter(tagQuery = "")
-                            focusManager.clearFocus(force = true)
-                        }) {
-                            Icon(Icons.Default.Clear, null)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (tagSearch.isNotEmpty()) {
+                            IconButton(onClick = {
+                                tagSearch = ""
+                                viewModel.updateFilter(tagQuery = "")
+                                focusManager.clearFocus(force = true)
+                            }) {
+                                Icon(Icons.Default.Clear, contentDescription = "清除搜索")
+                            }
                         }
-                    }
-                    if (searchHasFocus) {
-                        IconButton(onClick = { focusManager.clearFocus(force = true) }) {
-                            Icon(Icons.Default.Done, contentDescription = "完成搜索")
+                        if (searchHasFocus) {
+                            IconButton(onClick = { focusManager.clearFocus(force = true) }) {
+                                Icon(Icons.Default.Done, contentDescription = "完成搜索")
+                            }
                         }
                     }
                 }
