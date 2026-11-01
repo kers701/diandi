@@ -1,5 +1,6 @@
 package com.diandi.bookkeeping.service
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,6 +9,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
@@ -15,7 +17,10 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.diandi.bookkeeping.QuickAddActivity
 import com.diandi.bookkeeping.data.db.AppDatabase
 import com.diandi.bookkeeping.util.AppPrefs
@@ -26,14 +31,17 @@ class KeepAliveService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var wakeLock: PowerManager.WakeLock? = null
+    private var foregroundStarted = false
+    private var restartAllowed = true
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
             if (!AppPrefs.isNotifyEnabled(this@KeepAliveService)) {
+                restartAllowed = false
                 stopSelf()
                 return
             }
-            updateNotification()
+            if (!updateNotification()) return
             acquireWake()
             handler.postDelayed(this, REFRESH_MS)
         }
@@ -43,44 +51,57 @@ class KeepAliveService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "diandi:fgs")
-            .apply { setReferenceCounted(false) }
-        createChannel()
-        startFg(buildNotification("点滴记账", "加载中…", 0))
-        acquireWake()
-        handler.post(refreshRunnable)
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "diandi:fgs")
+                .apply { setReferenceCounted(false) }
+            createChannel()
+            if (!startFg(buildNotification("点滴记账", "加载中…", 0))) return
+            acquireWake()
+            handler.post(refreshRunnable)
+        } catch (e: Exception) {
+            Log.e(TAG, "Service initialization failed", e)
+            restartAllowed = false
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!AppPrefs.isNotifyEnabled(this)) {
+            restartAllowed = false
             stopSelf()
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_STOP) {
+            restartAllowed = false
             stopSelf()
             return START_NOT_STICKY
         }
-        updateNotification()
-        scheduleRestartAlarm(this)
+        if (!foregroundStarted || !updateNotification()) {
+            restartAllowed = false
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        scheduleRestartAlarm(this)
+        if (foregroundStarted && restartAllowed && AppPrefs.isNotifyEnabled(this)) {
+            scheduleRestartAlarm(this)
+        }
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(refreshRunnable)
         releaseWake()
-        if (AppPrefs.isNotifyEnabled(this)) {
+        if (foregroundStarted && restartAllowed && AppPrefs.isNotifyEnabled(this)) {
             scheduleRestartAlarm(this)
         }
         super.onDestroy()
     }
 
-    private fun startFg(notification: Notification) {
+    private fun startFg(notification: Notification): Boolean {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(
@@ -90,10 +111,19 @@ class KeepAliveService : Service() {
             } else {
                 startForeground(NOTIF_ID, notification)
             }
-        } catch (_: Exception) {
+            foregroundStarted = true
+            return true
+        } catch (first: Exception) {
+            Log.e(TAG, "Typed foreground start failed", first)
             try {
                 startForeground(NOTIF_ID, notification)
-            } catch (_: Exception) {
+                foregroundStarted = true
+                return true
+            } catch (fallback: Exception) {
+                Log.e(TAG, "Foreground service could not start", fallback)
+                restartAllowed = false
+                stopSelf()
+                return false
             }
         }
     }
@@ -112,11 +142,18 @@ class KeepAliveService : Service() {
         }
     }
 
-    private fun updateNotification() {
-        val (title, text, progress) = computeProgressText()
-        val n = buildNotification(title, text, progress)
-        startFg(n)
-        getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, n)
+    private fun updateNotification(): Boolean {
+        if (!foregroundStarted) return false
+        return try {
+            val (title, text, progress) = computeProgressText()
+            val n = buildNotification(title, text, progress)
+            startFg(n)
+        } catch (e: Exception) {
+            Log.e(TAG, "Notification update failed", e)
+            restartAllowed = false
+            stopSelf()
+            false
+        }
     }
 
     private fun computeProgressText(): Triple<String, String, Int> {
@@ -203,9 +240,14 @@ class KeepAliveService : Service() {
         const val NOTIF_ID = 10086
         const val REFRESH_MS = 2 * 60 * 1000L
         const val ACTION_STOP = "com.diandi.bookkeeping.STOP_KEEPALIVE"
+        private const val TAG = "KeepAliveService"
 
         fun start(context: Context) {
             if (!AppPrefs.isNotifyEnabled(context)) return
+            if (!canShowNotification(context)) {
+                Log.w(TAG, "Notification permission or channel is disabled; service not started")
+                return
+            }
             val i = Intent(context, KeepAliveService::class.java)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -213,8 +255,25 @@ class KeepAliveService : Service() {
                 } else {
                     context.startService(i)
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not request foreground service start", e)
             }
+        }
+
+        fun canShowNotification(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) return false
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = context.getSystemService(NotificationManager::class.java)
+                    ?.getNotificationChannel(CHANNEL_ID)
+                if (channel?.importance == NotificationManager.IMPORTANCE_NONE) return false
+            }
+            return true
         }
 
         fun stop(context: Context) {

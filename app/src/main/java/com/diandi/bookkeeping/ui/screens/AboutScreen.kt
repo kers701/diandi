@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
@@ -62,7 +63,23 @@ fun AboutScreen(onBack: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     var notifyOn by remember {
-        mutableStateOf(AppPrefs.isNotifyEnabled(context))
+        mutableStateOf(
+            AppPrefs.isNotifyEnabled(context) && KeepAliveService.canShowNotification(context)
+        )
+    }
+    val notifyPermissionLauncher = rememberLauncherForActivityResult(RequestPermission()) { granted ->
+        if (granted && AppPrefs.isNotifyEnabled(context) && KeepAliveService.canShowNotification(context)) {
+            KeepAliveService.start(context)
+        } else {
+            notifyOn = false
+            AppPrefs.setNotifyEnabled(context, false)
+            KeepAliveService.stop(context)
+            Toast.makeText(
+                context,
+                "未获得通知权限或常驻通知渠道已关闭，常驻通知未启用。",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
     var autoBillOn by remember {
         mutableStateOf(AppPrefs.isAutoBillEnabled(context))
@@ -190,9 +207,20 @@ fun AboutScreen(onBack: () -> Unit) {
                                     context, Manifest.permission.POST_NOTIFICATIONS
                                 ) != PackageManager.PERMISSION_GRANTED
                             if (!needPerm) {
-                                KeepAliveService.start(context)
+                                if (KeepAliveService.canShowNotification(context)) {
+                                    KeepAliveService.start(context)
+                                } else {
+                                    notifyOn = false
+                                    AppPrefs.setNotifyEnabled(context, false)
+                                    Toast.makeText(
+                                        context,
+                                        "请在系统设置中允许点滴通知，并开启“点滴常驻”通知渠道。",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            } else {
+                                notifyPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
-                            // 无通知权限时由主界面下次启动再申请
                         } else {
                             KeepAliveService.stop(context)
                         }

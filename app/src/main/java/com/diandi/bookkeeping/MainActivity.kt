@@ -35,7 +35,14 @@ class MainActivity : ComponentActivity() {
 
     private val notifPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { KeepAliveService.start(this) }
+    ) { granted ->
+        if (granted && AppPrefs.isNotifyEnabled(this) && KeepAliveService.canShowNotification(this)) {
+            KeepAliveService.start(this)
+        } else {
+            AppPrefs.setNotifyEnabled(this, false)
+            KeepAliveService.stop(this)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,25 +88,27 @@ class MainActivity : ComponentActivity() {
         // 通知已改为打开 QuickAddActivity，主界面不再处理记账 action
     }
 
-    override fun onStop() {
-        super.onStop()
-        // 主任务进入后台/被划掉时，调度通知服务自启（独立进程）
-        KeepAliveService.scheduleRestartAlarm(this)
-    }
-
     private fun requestNotifAndStartService() {
         if (!AppPrefs.isNotifyEnabled(this)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this, Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
+            ) == PackageManager.PERMISSION_GRANTED
             ) {
-                KeepAliveService.start(this)
+                if (KeepAliveService.canShowNotification(this)) {
+                    KeepAliveService.start(this)
+                } else {
+                    AppPrefs.setNotifyEnabled(this, false)
+                }
             } else {
                 notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         } else {
-            KeepAliveService.start(this)
+            if (KeepAliveService.canShowNotification(this)) {
+                KeepAliveService.start(this)
+            } else {
+                AppPrefs.setNotifyEnabled(this, false)
+            }
         }
     }
 }
