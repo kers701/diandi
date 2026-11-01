@@ -9,6 +9,7 @@ import android.text.TextUtils
 import com.diandi.bookkeeping.data.db.AppDatabase
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.util.Categories
 import java.time.LocalDate
 import java.util.Locale
 import java.util.concurrent.CancellationException
@@ -123,7 +124,7 @@ object AutoBillParser {
     )
 
     fun parse(content: String, context: android.content.Context): ParsedAutoBill? {
-        val text = content.replace('\n', ' ').trim()
+        val text = normalizeNotificationText(content)
         val lower = text.lowercase(Locale.ROOT)
         val expenseKeywords = AutoBillKeywords.expense + AppPrefs.getAutoBillAllowedKeywords(context)
         val incomeKeywords = AutoBillKeywords.income
@@ -234,22 +235,52 @@ object AutoBillParser {
         return "$stableKey|${amount}|${content.take(240)}"
     }
 
-    private fun inferCategory(text: String, isIncome: Boolean): String {
-        if (isIncome) {
-            return when {
+    private fun inferCategory(
+        context: android.content.Context,
+        text: String,
+        isIncome: Boolean
+    ): String {
+        val categories = if (isIncome) {
+            Categories.income(context)
+        } else {
+            Categories.expense(context)
+        }
+        categories.firstOrNull { text.contains(it, ignoreCase = true) }?.let { return it }
+
+        val fallback = if (isIncome) {
+            when {
                 text.contains("工资") || text.contains("薪资") -> "工资"
                 text.contains("红包") -> "红包"
                 text.contains("转账") || text.contains("转入") -> "转账"
                 else -> "其他收入"
             }
+        } else {
+            when {
+                listOf("餐饮", "吃饭", "美团", "饿了么", "外卖", "餐厅").any { text.contains(it) } -> "餐饮"
+                listOf("淘宝", "天猫", "京东", "购物", "商品", "拼多多").any { text.contains(it) } -> "购物"
+                listOf("滴滴", "打车", "地铁", "公交", "交通", "加油").any { text.contains(it) } -> "交通"
+                listOf("水费", "电费", "燃气", "话费").any { text.contains(it) } -> "生活缴费"
+                else -> "其他支出"
+            }
         }
-        return when {
-            listOf("餐饮", "吃饭", "美团", "饿了么", "外卖", "餐厅").any { text.contains(it) } -> "餐饮"
-            listOf("淘宝", "天猫", "京东", "购物", "商品", "拼多多").any { text.contains(it) } -> "购物"
-            listOf("滴滴", "打车", "地铁", "公交", "交通", "加油").any { text.contains(it) } -> "交通"
-            listOf("水费", "电费", "燃气", "话费").any { text.contains(it) } -> "生活缴费"
-            else -> "其他支出"
-        }
+
+        return fallback.takeIf { it in categories }
+            ?: categories.firstOrNull()
+            ?: fallback
+    }
+
+    private fun normalizeNotificationText(content: String): String {
+        val countBadge = Regex("""[\[【(（]\s*\d+\s*条\s*[\]】)）]""")
+        val duplicateTitle = Regex("""^(.{1,24}?)\s+\1(?=\s*[:：])""")
+        val withoutCount = content
+            .replace('\n', ' ')
+            .replace(countBadge, " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        return duplicateTitle.replaceFirst(withoutCount, "$1")
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 }
 
