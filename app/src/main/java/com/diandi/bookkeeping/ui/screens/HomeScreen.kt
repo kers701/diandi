@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -78,6 +79,7 @@ fun HomeScreen(
     val filter by viewModel.filter.collectAsState()
 
     var showFilterSheet by remember { mutableStateOf(false) }
+    var showBillsPage by rememberSaveable { mutableStateOf(false) }
     var showCategoryEditConfirm by remember { mutableStateOf(false) }
     var titleTapCount by remember { mutableIntStateOf(0) }
     var lastTitleTapAt by remember { mutableLongStateOf(0L) }
@@ -199,9 +201,9 @@ fun HomeScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "点滴",
+                        if (showBillsPage) "账单" else "点滴",
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable {
+                        modifier = if (showBillsPage) Modifier else Modifier.clickable {
                             val now = System.currentTimeMillis()
                             titleTapCount = if (now - lastTitleTapAt > 2000L) 1 else titleTapCount + 1
                             lastTitleTapAt = now
@@ -214,32 +216,51 @@ fun HomeScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = balanceBackground),
                 actions = {
-                    IconButton(onClick = onChartsClick) {
-                        Icon(Icons.Default.BarChart, contentDescription = "图表")
-                    }
-                    IconButton(onClick = onGoalsClick) {
-                        Icon(Icons.Default.Savings, contentDescription = "攒钱目标")
-                    }
-                    IconButton(onClick = onAiAnalysisClick) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = "AI 消费分析")
-                    }
-                    IconButton(onClick = onCorrectionClick) {
-                        Icon(Icons.Default.AccountBalance, contentDescription = "资金修正")
-                    }
-                    IconButton(onClick = {
-                        automaticUpdateCheck = false
-                        updateCheckRequest++
-                    }) {
-                        Icon(Icons.Default.SystemUpdate, contentDescription = "检查更新")
-                    }
-                    IconButton(onClick = onAboutClick) {
-                        Icon(Icons.Default.Info, contentDescription = "软件说明")
-                    }
-                    IconButton(onClick = { showFilterSheet = true }) {
-                        Icon(Icons.Default.FilterList, contentDescription = "筛选")
+                    if (showBillsPage) {
+                        IconButton(onClick = { showFilterSheet = true }) {
+                            Icon(Icons.Default.FilterList, contentDescription = "筛选账单")
+                        }
+                    } else {
+                        IconButton(onClick = onChartsClick) {
+                            Icon(Icons.Default.BarChart, contentDescription = "图表")
+                        }
+                        IconButton(onClick = onGoalsClick) {
+                            Icon(Icons.Default.Savings, contentDescription = "攒钱目标")
+                        }
+                        IconButton(onClick = onAiAnalysisClick) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "AI 消费分析")
+                        }
+                        IconButton(onClick = onCorrectionClick) {
+                            Icon(Icons.Default.AccountBalance, contentDescription = "资金修正")
+                        }
+                        IconButton(onClick = {
+                            automaticUpdateCheck = false
+                            updateCheckRequest++
+                        }) {
+                            Icon(Icons.Default.SystemUpdate, contentDescription = "检查更新")
+                        }
+                        IconButton(onClick = onAboutClick) {
+                            Icon(Icons.Default.Info, contentDescription = "软件说明")
+                        }
                     }
                 }
             )
+        },
+        bottomBar = {
+            NavigationBar(containerColor = balanceBackground) {
+                NavigationBarItem(
+                    selected = !showBillsPage,
+                    onClick = { showBillsPage = false },
+                    icon = { Icon(Icons.Default.Home, contentDescription = "首页") },
+                    label = { Text("首页") }
+                )
+                NavigationBarItem(
+                    selected = showBillsPage,
+                    onClick = { showBillsPage = true },
+                    icon = { Icon(Icons.Default.Receipt, contentDescription = "账单") },
+                    label = { Text("账单") }
+                )
+            }
         },
         floatingActionButton = {
             FloatingActionButton(
@@ -256,13 +277,14 @@ fun HomeScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
-            Spacer(Modifier.height(8.dp))
-            BalanceCard(
-                balance = balance,
-                income = income,
-                expense = expense,
-                accentColor = balanceAccent
-            )
+            if (!showBillsPage) {
+                Spacer(Modifier.height(8.dp))
+                BalanceCard(
+                    balance = balance,
+                    income = income,
+                    expense = expense,
+                    accentColor = balanceAccent
+                )
 
             val goals by viewModel.goals.collectAsState()
             val targetSum = goals.sumOf { it.targetAmount }
@@ -305,7 +327,7 @@ fun HomeScreen(
             if (smartAnalysisEnabled) {
                 Spacer(Modifier.height(8.dp))
                 Card(
-                    modifier = Modifier.fillMaxWidth().clickable {
+                    modifier = Modifier.fillMaxWidth().weight(1f).clickable {
                         if (smartAnalysisResult.isNotBlank()) showFullAnalysisDialog = true
                         else onAiAnalysisClick()
                     },
@@ -341,8 +363,8 @@ fun HomeScreen(
                     }
                 }
             }
-
-            Spacer(Modifier.height(12.dp))
+            } else {
+                Spacer(Modifier.height(8.dp))
 
             // 支持搜索标签、类目、金额和备注
             OutlinedTextField(
@@ -478,6 +500,7 @@ fun HomeScreen(
                     }
                 }
             }
+            }
         }
     }
 
@@ -508,7 +531,10 @@ fun HomeScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 720.dp)
+                    .heightIn(max = 720.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
             ) {
                 Column(
                     modifier = Modifier
@@ -521,7 +547,7 @@ fun HomeScreen(
                         Text(
                             "完整分析报告",
                             modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                         TextButton(onClick = { showFullAnalysisDialog = false }) { Text("关闭") }
@@ -534,7 +560,7 @@ fun HomeScreen(
                         )
                     }
                     HorizontalDivider()
-                    Text(smartAnalysisResult, style = MaterialTheme.typography.bodyLarge)
+                    Text(smartAnalysisResult, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
