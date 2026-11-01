@@ -222,16 +222,16 @@ object BackupManager {
     }
 
     private fun JSONArray.checkedSize(label: String): JSONArray {
-        require(length() <= MAX_ROWS_PER_TABLE) { "$label数量超出允许范围。" }
+        require(length() <= MAX_ROWS_PER_TABLE) { "${label}数量超出允许范围。" }
         return this
     }
 
     private fun JSONArray.toStringList(label: String): List<String> {
-        require(length() in 1..10_000) { "$label列表无效。" }
+        require(length() in 1..10_000) { "${label}列表无效。" }
         val result = List(length()) { index ->
-            getString(index).trim().also { require(it.isNotBlank()) { "$label中存在空项。" } }
+            getString(index).trim().also { require(it.isNotBlank()) { "${label}中存在空项。" } }
         }
-        require(result.distinct().size == result.size) { "$label中存在重复项。" }
+        require(result.distinct().size == result.size) { "${label}中存在重复项。" }
         return result
     }
 
