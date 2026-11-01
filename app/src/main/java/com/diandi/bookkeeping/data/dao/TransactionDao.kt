@@ -24,6 +24,19 @@ interface TransactionDao {
 
     @Query("""
         SELECT * FROM transactions
+        WHERE printf('%04d-%02d-%02d', year, month, day) >= :startDate
+          AND printf('%04d-%02d-%02d', year, month, day) <= :endDate
+        ORDER BY year DESC, month DESC, day DESC, createdAt DESC
+        LIMIT :limit
+    """)
+    suspend fun getTransactionsForAiAnalysis(
+        startDate: String,
+        endDate: String,
+        limit: Int
+    ): List<Transaction>
+
+    @Query("""
+        SELECT * FROM transactions
         WHERE (:startDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) >= :startDate)
           AND (:endDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) <= :endDate)
           AND (:type IS NULL OR type = :type)

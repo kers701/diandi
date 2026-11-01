@@ -31,9 +31,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.ui.components.BalanceCard
 import com.diandi.bookkeeping.ui.components.TypeChip
@@ -62,7 +67,8 @@ fun HomeScreen(
     onCorrectionClick: () -> Unit,
     onAboutClick: () -> Unit = {},
     onCategoryEditClick: () -> Unit = {},
-    onEditClick: (Long) -> Unit = {}
+    onEditClick: (Long) -> Unit = {},
+    onAiAnalysisClick: () -> Unit = {}
 ) {
     val transactions by viewModel.transactions.collectAsState()
     val balance by viewModel.balance.collectAsState()
@@ -75,6 +81,11 @@ fun HomeScreen(
     var titleTapCount by remember { mutableIntStateOf(0) }
     var lastTitleTapAt by remember { mutableLongStateOf(0L) }
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var smartAnalysisEnabled by remember { mutableStateOf(AiAnalysisPrefs.isEnabled(context)) }
+    var smartAnalysisResult by remember { mutableStateOf(AiAnalysisPrefs.result(context)) }
+    var smartAnalysisError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
+    var smartAnalysisUpdatedAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
     val focusManager = LocalFocusManager.current
     var searchHasFocus by remember { mutableStateOf(false) }
     var scaffoldCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -90,6 +101,33 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val balanceAccent = balanceAccentColor(balance)
     val balanceBackground = balanceAccent.copy(alpha = 0.07f)
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                smartAnalysisEnabled = AiAnalysisPrefs.isEnabled(context)
+                smartAnalysisResult = AiAnalysisPrefs.result(context)
+                smartAnalysisError = AiAnalysisPrefs.lastError(context)
+                smartAnalysisUpdatedAt = AiAnalysisPrefs.lastSuccessAt(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    DisposableEffect(context) {
+        val preferences = context.getSharedPreferences(
+            "smart_consumption_analysis", android.content.Context.MODE_PRIVATE
+        )
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            smartAnalysisEnabled = AiAnalysisPrefs.isEnabled(context)
+            smartAnalysisResult = AiAnalysisPrefs.result(context)
+            smartAnalysisError = AiAnalysisPrefs.lastError(context)
+            smartAnalysisUpdatedAt = AiAnalysisPrefs.lastSuccessAt(context)
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 
     BackHandler(enabled = searchHasFocus && !showCategoryEditConfirm && !checkUpdate) {
         focusManager.clearFocus(force = true)
@@ -180,6 +218,9 @@ fun HomeScreen(
                     IconButton(onClick = onGoalsClick) {
                         Icon(Icons.Default.Savings, contentDescription = "攒钱目标")
                     }
+                    IconButton(onClick = onAiAnalysisClick) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "AI 消费分析")
+                    }
                     IconButton(onClick = onCorrectionClick) {
                         Icon(Icons.Default.AccountBalance, contentDescription = "资金修正")
                     }
@@ -255,6 +296,43 @@ fun HomeScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+
+            if (smartAnalysisEnabled) {
+                Spacer(Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onAiAnalysisClick),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("AI 消费分析", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        if (smartAnalysisResult.isNotBlank()) {
+                            Text(
+                                smartAnalysisResult,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 6,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text("点击查看完整分析", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            if (smartAnalysisUpdatedAt > 0L) {
+                                Text(
+                                    "更新于 ${java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(smartAnalysisUpdatedAt))}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            Text(
+                                smartAnalysisError.ifBlank { "尚无分析结果；首次开启后会立即分析。" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (smartAnalysisError.isNotBlank()) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

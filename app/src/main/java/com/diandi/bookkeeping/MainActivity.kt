@@ -130,6 +130,7 @@ fun DiandiNav(
                 onAddClick = { navController.navigate(Screen.Add.route) },
                 onChartsClick = { navController.navigate(Screen.Charts.route) },
                 onGoalsClick = { navController.navigate(Screen.Goals.route) },
+                onAiAnalysisClick = { navController.navigate(Screen.AiAnalysis.route) },
                 onCorrectionClick = { navController.navigate(Screen.Correction.route) },
                 onAboutClick = { navController.navigate(Screen.About.route) },
                 onCategoryEditClick = { navController.navigate(Screen.CategoryEdit.route) },
@@ -164,6 +165,9 @@ fun DiandiNav(
         }
         composable(Screen.Goals.route) {
             GoalsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+        }
+        composable(Screen.AiAnalysis.route) {
+            AiAnalysisScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.Correction.route) {
             CorrectionScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
