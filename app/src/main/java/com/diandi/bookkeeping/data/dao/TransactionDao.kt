@@ -13,8 +13,17 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions ORDER BY year DESC, month DESC, day DESC, createdAt DESC")
     fun getAllTransactions(): Flow<List<Transaction>>
 
+    @Query("SELECT * FROM transactions ORDER BY id ASC")
+    suspend fun getTransactionsForBackup(): List<Transaction>
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAllTransactions()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTransactions(items: List<Transaction>)
+
     @Query("""
-        SELECT * FROM transactions 
+        SELECT * FROM transactions
         WHERE (:startDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) >= :startDate)
           AND (:endDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) <= :endDate)
           AND (:type IS NULL OR type = :type)
@@ -62,7 +71,7 @@ interface TransactionDao {
 
     // 按年月分组统计（折线图用）
     @Query("""
-        SELECT year, month, 
+        SELECT year, month,
                SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END) as expense,
                SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as income
         FROM transactions
@@ -104,6 +113,15 @@ interface TransactionDao {
     @Query("SELECT * FROM savings_goals ORDER BY createdAt DESC")
     fun getAllGoals(): Flow<List<SavingsGoal>>
 
+    @Query("SELECT * FROM savings_goals ORDER BY id ASC")
+    suspend fun getGoalsForBackup(): List<SavingsGoal>
+
+    @Query("DELETE FROM savings_goals")
+    suspend fun deleteAllGoals()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGoals(items: List<SavingsGoal>)
+
     @Insert
     suspend fun insertGoal(goal: SavingsGoal): Long
 
@@ -116,6 +134,15 @@ interface TransactionDao {
     // ========== 资金修正 ==========
     @Query("SELECT * FROM fund_corrections ORDER BY createdAt DESC")
     fun getAllCorrections(): Flow<List<FundCorrection>>
+
+    @Query("SELECT * FROM fund_corrections ORDER BY id ASC")
+    suspend fun getCorrectionsForBackup(): List<FundCorrection>
+
+    @Query("DELETE FROM fund_corrections")
+    suspend fun deleteAllCorrections()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCorrections(items: List<FundCorrection>)
 
     @Query("SELECT COALESCE(SUM(amount), 0) FROM fund_corrections")
     fun getTotalCorrection(): Flow<Double>

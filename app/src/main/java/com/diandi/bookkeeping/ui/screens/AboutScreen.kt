@@ -8,6 +8,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
+import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,12 +30,19 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.diandi.bookkeeping.data.backup.BackupManager
 import com.diandi.bookkeeping.BuildConfig
 import com.diandi.bookkeeping.service.AutoBillNotificationService
 import com.diandi.bookkeeping.service.KeepAliveService
 import com.diandi.bookkeeping.util.AppPrefs
 import com.diandi.bookkeeping.util.InstalledAppsHelper
 import com.diandi.bookkeeping.util.LauncherAppInfo
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,6 +84,41 @@ fun AboutScreen(onBack: () -> Unit) {
     // 与 wallpaper_app 相同：全部可启动应用（含系统预装），不按 FLAG_SYSTEM 剔除
     val installedApps: List<LauncherAppInfo> = remember(context) {
         InstalledAppsHelper.listLaunchableApps(context)
+    }
+    val scope = rememberCoroutineScope()
+    var dataTransferBusy by remember { mutableStateOf(false) }
+    var pendingRestore by remember { mutableStateOf<BackupManager.Snapshot?>(null) }
+    var dataTransferMessage by remember { mutableStateOf<String?>(null) }
+    val exportBackupLauncher = rememberLauncherForActivityResult(CreateDocument("application/json")) { uri ->
+        if (uri != null) scope.launch {
+            dataTransferBusy = true
+            try {
+                BackupManager.export(context, uri)
+                dataTransferMessage = "数据备份已导出。"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                dataTransferMessage = e.message ?: "导出失败，请重试。"
+            } finally {
+                dataTransferBusy = false
+            }
+        }
+    }
+    val importBackupLauncher = rememberLauncherForActivityResult(OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            dataTransferBusy = true
+            try {
+                pendingRestore = withContext(Dispatchers.IO) {
+                    BackupManager.read(context, uri)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                dataTransferMessage = e.message ?: "无法读取这个备份文件。"
+            } finally {
+                dataTransferBusy = false
+            }
+        }
     }
 
     Scaffold(
@@ -261,6 +306,38 @@ fun AboutScreen(onBack: () -> Unit) {
             }
 
             HorizontalDivider()
+            Text("数据备份与恢复", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "备份包含账单、攒钱目标、资金修正和当前类目配置。恢复会替换当前这些数据；通知权限等系统授权不会写入备份。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(
+                onClick = {
+                    val date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+                    exportBackupLauncher.launch("diandi_backup_$date.json")
+                },
+                enabled = !dataTransferBusy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("导出数据备份")
+            }
+            OutlinedButton(
+                onClick = {
+                    importBackupLauncher.launch(
+                        arrayOf("application/json", "text/json", "text/plain", "application/octet-stream")
+                    )
+                },
+                enabled = !dataTransferBusy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("从文件恢复数据")
+            }
+            if (dataTransferBusy) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            HorizontalDivider()
             Text(
                 "开源仓库：github.com/kers701/diandi\n数据仅存本机，卸载即清除。",
                 style = MaterialTheme.typography.bodySmall,
@@ -352,6 +429,50 @@ fun AboutScreen(onBack: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { showAppPicker = false }) { Text("取消") }
+            }
+        )
+    }
+    pendingRestore?.let { snapshot ->
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("确认恢复备份？") },
+            text = {
+                Text(
+                    "文件已通过校验，包含 ${snapshot.transactions.size} 笔账单、${snapshot.goals.size} 个攒钱目标、" +
+                        "${snapshot.corrections.size} 条资金修正，以及 ${snapshot.expenseCategories.size + snapshot.incomeCategories.size} 个类目。\n\n" +
+                        "恢复会替换本机现有数据，建议先导出当前备份。此操作无法自动撤销。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingRestore = null
+                    scope.launch {
+                        dataTransferBusy = true
+                        try {
+                            BackupManager.restore(context, snapshot)
+                            dataTransferMessage = "数据恢复完成。账单、余额和图表已更新。"
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            dataTransferMessage = e.message ?: "恢复失败，当前数据未能完成替换。"
+                        } finally {
+                            dataTransferBusy = false
+                        }
+                    }
+                }) { Text("恢复并替换") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestore = null }) { Text("取消") }
+            }
+        )
+    }
+    dataTransferMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { dataTransferMessage = null },
+            title = { Text("数据备份") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { dataTransferMessage = null }) { Text("确定") }
             }
         )
     }
