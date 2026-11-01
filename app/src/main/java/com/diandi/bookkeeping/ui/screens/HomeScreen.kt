@@ -38,9 +38,13 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,6 +111,11 @@ fun HomeScreen(
         viewModel.getCategoryDistribution("EXPENSE", currentMonth.year, currentMonth.monthValue, null)
     }
     val homeCategoryStats by homeCategoryStatsFlow.collectAsState(initial = emptyList())
+    val noAvailableAnalysisModels = smartAnalysisError.startsWith("所有已启用模型均未返回有效分析") ||
+        smartAnalysisError.startsWith("没有可用模型")
+    val showCategoryChartFallback = !smartAnalysisEnabled || (
+        smartAnalysisResult.isBlank() && !smartAnalysisRunning && noAvailableAnalysisModels
+    )
     val focusManager = LocalFocusManager.current
     var searchHasFocus by remember { mutableStateOf(false) }
     var scaffoldCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -398,7 +407,7 @@ fun HomeScreen(
                 }
             }
 
-            if (smartAnalysisEnabled) {
+            if (smartAnalysisEnabled && !showCategoryChartFallback) {
                 Spacer(Modifier.height(8.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth().weight(1f).then(
@@ -422,7 +431,10 @@ fun HomeScreen(
                                 Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
                             ) {
                                 Text(
-                                    smartAnalysisResult,
+                                    highlightMoneyAmounts(
+                                        smartAnalysisResult,
+                                        MaterialTheme.colorScheme.primary
+                                    ),
                                     modifier = Modifier.pointerInput(smartAnalysisResult) {
                                         detectTapGestures(onDoubleTap = {
                                             showCopyAnalysisConfirm = true
@@ -874,6 +886,23 @@ private fun HomeCategoryChart(
             }
         }
     }
+}
+
+private val MONEY_AMOUNT_PATTERN = Regex("""[¥￥]\s*[+-]?\d[\d,]*(?:\.\d+)?|[+-]?\d[\d,]*(?:\.\d+)?\s*(?:元|块)""")
+
+private fun highlightMoneyAmounts(text: String, amountColor: Color): AnnotatedString = buildAnnotatedString {
+    var cursor = 0
+    MONEY_AMOUNT_PATTERN.findAll(text).forEach { match ->
+        val start = match.range.first
+        if (start >= cursor) {
+            append(text.substring(cursor, start))
+            withStyle(SpanStyle(color = amountColor, fontWeight = FontWeight.SemiBold)) {
+                append(match.value)
+            }
+            cursor = match.range.last + 1
+        }
+    }
+    if (cursor < text.length) append(text.substring(cursor))
 }
 
 private fun balanceAccentColor(balance: Double): Color {
