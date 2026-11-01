@@ -1,6 +1,7 @@
 package com.diandi.bookkeeping.data.ai
 
 import android.content.Context
+import android.content.Intent
 
 /** 智能消费分析的本机配置与最近结果；API Key 不写入账单备份。 */
 object AiAnalysisPrefs {
@@ -16,6 +17,14 @@ object AiAnalysisPrefs {
     private const val KEY_RESULT = "result"
     private const val KEY_LAST_SUCCESS_AT = "last_success_at"
     private const val KEY_LAST_ERROR = "last_error"
+    private const val KEY_ANALYZING = "analyzing"
+
+    const val ACTION_STATE_CHANGED = "com.diandi.bookkeeping.action.AI_ANALYSIS_STATE_CHANGED"
+    const val EXTRA_ENABLED = "enabled"
+    const val EXTRA_RESULT = "result"
+    const val EXTRA_LAST_SUCCESS_AT = "last_success_at"
+    const val EXTRA_LAST_ERROR = "last_error"
+    const val EXTRA_ANALYZING = "analyzing"
 
     const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
     const val DEFAULT_MODEL = "gpt-4o-mini"
@@ -26,12 +35,14 @@ object AiAnalysisPrefs {
 
     data class Candidate(val provider: AiProviderConfig, val model: AiModelEntry)
 
+    @Suppress("DEPRECATION")
     private fun prefs(context: Context) =
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS)
 
     fun isEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, false)
     fun setEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).commit()
+        notifyStateChanged(context)
     }
 
     fun apiKey(context: Context): String = prefs(context).getString(KEY_API_KEY, "").orEmpty()
@@ -112,13 +123,13 @@ object AiAnalysisPrefs {
         prefs(context).edit()
             .putString(KEY_PROVIDERS_JSON, AiModelConfigCodec.providersToJson(providers))
             .putString(KEY_MODELS_JSON, AiModelConfigCodec.modelsToJson(nextModels))
-            .apply()
+            .commit()
     }
 
     fun saveModels(context: Context, models: List<AiModelEntry>) {
         prefs(context).edit()
             .putString(KEY_MODELS_JSON, AiModelConfigCodec.modelsToJson(models))
-            .apply()
+            .commit()
     }
 
     /** 合并服务商从 /models 拉取的名称；已存在模型的启用状态和顺序不变。 */
@@ -144,12 +155,12 @@ object AiAnalysisPrefs {
         prefs(context).edit()
             .putString(KEY_PROVIDERS_JSON, AiModelConfigCodec.providersToJson(updatedProviders))
             .putString(KEY_MODELS_JSON, AiModelConfigCodec.modelsToJson(currentModels))
-            .apply()
+            .commit()
         return added
     }
 
     fun setDailyTime(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_DAILY_TIME, value.trim()).apply()
+        prefs(context).edit().putString(KEY_DAILY_TIME, value.trim()).commit()
     }
 
     fun maxOutputChars(context: Context): Int = prefs(context)
@@ -159,7 +170,7 @@ object AiAnalysisPrefs {
     fun setMaxOutputChars(context: Context, value: Int) {
         prefs(context).edit()
             .putInt(KEY_MAX_OUTPUT_CHARS, value.coerceIn(MIN_OUTPUT_CHARS, MAX_OUTPUT_CHARS))
-            .apply()
+            .commit()
     }
 
     /** 保留旧配置写入方法，便于兼容尚未迁移的安装版本。 */
@@ -169,22 +180,42 @@ object AiAnalysisPrefs {
             .putString(KEY_BASE_URL, baseUrl.trim().trimEnd('/'))
             .putString(KEY_MODEL, model.trim())
             .putString(KEY_DAILY_TIME, dailyTime.trim())
-            .apply()
+            .commit()
     }
 
     fun result(context: Context): String = prefs(context).getString(KEY_RESULT, "").orEmpty()
     fun lastSuccessAt(context: Context): Long = prefs(context).getLong(KEY_LAST_SUCCESS_AT, 0L)
     fun lastError(context: Context): String = prefs(context).getString(KEY_LAST_ERROR, "").orEmpty()
+    fun isAnalyzing(context: Context): Boolean = prefs(context).getBoolean(KEY_ANALYZING, false)
+
+    fun setAnalyzing(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ANALYZING, value).commit()
+        notifyStateChanged(context)
+    }
 
     fun saveResult(context: Context, text: String, timestamp: Long = System.currentTimeMillis()) {
         prefs(context).edit()
             .putString(KEY_RESULT, text.take(maxOutputChars(context)))
             .putLong(KEY_LAST_SUCCESS_AT, timestamp)
             .remove(KEY_LAST_ERROR)
-            .apply()
+            .commit()
+        notifyStateChanged(context)
     }
 
     fun saveError(context: Context, message: String) {
-        prefs(context).edit().putString(KEY_LAST_ERROR, message.take(240)).apply()
+        prefs(context).edit().putString(KEY_LAST_ERROR, message.take(240)).commit()
+        notifyStateChanged(context)
+    }
+
+    private fun notifyStateChanged(context: Context) {
+        val preferences = prefs(context)
+        val intent = Intent(ACTION_STATE_CHANGED)
+            .setPackage(context.packageName)
+            .putExtra(EXTRA_ENABLED, preferences.getBoolean(KEY_ENABLED, false))
+            .putExtra(EXTRA_RESULT, preferences.getString(KEY_RESULT, "").orEmpty())
+            .putExtra(EXTRA_LAST_SUCCESS_AT, preferences.getLong(KEY_LAST_SUCCESS_AT, 0L))
+            .putExtra(EXTRA_LAST_ERROR, preferences.getString(KEY_LAST_ERROR, "").orEmpty())
+            .putExtra(EXTRA_ANALYZING, preferences.getBoolean(KEY_ANALYZING, false))
+        context.applicationContext.sendBroadcast(intent)
     }
 }

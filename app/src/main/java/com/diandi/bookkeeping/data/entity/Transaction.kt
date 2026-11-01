@@ -1,6 +1,7 @@
 package com.diandi.bookkeeping.data.entity
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 import java.time.LocalDate
 
@@ -37,6 +38,8 @@ data class SavingsGoal(
     val targetAmount: Double,
     val currentAmount: Double = 0.0,
     val deadline: String = "",          // yyyy-MM-dd 或空
+    @ColumnInfo(defaultValue = "1.0")
+    val allocationWeight: Double = 1.0,
     val createdAt: Long = System.currentTimeMillis()
 )
 

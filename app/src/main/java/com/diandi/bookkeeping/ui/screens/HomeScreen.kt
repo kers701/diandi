@@ -1,5 +1,10 @@
 package com.diandi.bookkeeping.ui.screens
 
+import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.content.IntentFilter
 import android.widget.Toast
 import kotlin.math.roundToInt
 import androidx.activity.compose.BackHandler
@@ -32,10 +37,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -47,6 +52,7 @@ import com.diandi.bookkeeping.ui.components.formatMoney
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.AppUpdateChecker
+import com.diandi.bookkeeping.util.allocateBalanceByWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -89,6 +95,7 @@ fun HomeScreen(
     var smartAnalysisResult by remember { mutableStateOf(AiAnalysisPrefs.result(context)) }
     var smartAnalysisError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
     var smartAnalysisUpdatedAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
+    var smartAnalysisRunning by remember { mutableStateOf(AiAnalysisPrefs.isAnalyzing(context)) }
     var showFullAnalysisDialog by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     var searchHasFocus by remember { mutableStateOf(false) }
@@ -113,6 +120,7 @@ fun HomeScreen(
                 smartAnalysisResult = AiAnalysisPrefs.result(context)
                 smartAnalysisError = AiAnalysisPrefs.lastError(context)
                 smartAnalysisUpdatedAt = AiAnalysisPrefs.lastSuccessAt(context)
+                smartAnalysisRunning = AiAnalysisPrefs.isAnalyzing(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -120,17 +128,31 @@ fun HomeScreen(
     }
 
     DisposableEffect(context) {
-        val preferences = context.getSharedPreferences(
-            "smart_consumption_analysis", android.content.Context.MODE_PRIVATE
-        )
-        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-            smartAnalysisEnabled = AiAnalysisPrefs.isEnabled(context)
-            smartAnalysisResult = AiAnalysisPrefs.result(context)
-            smartAnalysisError = AiAnalysisPrefs.lastError(context)
-            smartAnalysisUpdatedAt = AiAnalysisPrefs.lastSuccessAt(context)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiveContext: android.content.Context?, intent: Intent?) {
+                val update = intent ?: return
+                smartAnalysisEnabled = update.getBooleanExtra(
+                    AiAnalysisPrefs.EXTRA_ENABLED, AiAnalysisPrefs.isEnabled(context)
+                )
+                smartAnalysisResult = update.getStringExtra(AiAnalysisPrefs.EXTRA_RESULT)
+                    ?: AiAnalysisPrefs.result(context)
+                smartAnalysisError = update.getStringExtra(AiAnalysisPrefs.EXTRA_LAST_ERROR)
+                    ?: AiAnalysisPrefs.lastError(context)
+                smartAnalysisUpdatedAt = update.getLongExtra(
+                    AiAnalysisPrefs.EXTRA_LAST_SUCCESS_AT, AiAnalysisPrefs.lastSuccessAt(context)
+                )
+                smartAnalysisRunning = update.getBooleanExtra(
+                    AiAnalysisPrefs.EXTRA_ANALYZING, AiAnalysisPrefs.isAnalyzing(context)
+                )
+            }
         }
-        preferences.registerOnSharedPreferenceChangeListener(listener)
-        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(AiAnalysisPrefs.ACTION_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose { context.unregisterReceiver(receiver) }
     }
 
     BackHandler(enabled = searchHasFocus && !showCategoryEditConfirm && !checkUpdate) {
@@ -288,6 +310,9 @@ fun HomeScreen(
 
             val goals by viewModel.goals.collectAsState()
             val targetSum = goals.sumOf { it.targetAmount }
+            val allocationByGoal = remember(goals, balance) {
+                allocateBalanceByWeight(balance, goals)
+            }
             if (targetSum > 0) {
                 val pct = ((balance / targetSum) * 100).coerceIn(0.0, 999.0)
                 Spacer(Modifier.height(8.dp))
@@ -320,6 +345,43 @@ fun HomeScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (goals.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "目标余额分配（当前正余额按权重分配，另含手动记录）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            goals.forEach { goal ->
+                                val allocated = allocationByGoal[goal.id] ?: 0.0
+                                val displayed = goal.currentAmount + allocated
+                                val goalProgress = if (goal.targetAmount > 0.0) {
+                                    (displayed / goal.targetAmount).coerceIn(0.0, 1.0).toFloat()
+                                } else 0f
+                                val weightLabel = if (goal.allocationWeight % 1.0 == 0.0) {
+                                    goal.allocationWeight.toInt().toString()
+                                } else goal.allocationWeight.toString()
+                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            "${goal.title} · 权重 $weightLabel",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                        Text(
+                                            "${formatMoney(displayed)} / ${formatMoney(goal.targetAmount)}",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
+                                    LinearProgressIndicator(
+                                        progress = { goalProgress },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -335,16 +397,23 @@ fun HomeScreen(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer
                     )
                 ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(
+                        Modifier.fillMaxSize().padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text("AI 消费分析", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         if (smartAnalysisResult.isNotBlank()) {
+                            Column(
+                                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                            ) {
+                                Text(smartAnalysisResult, style = MaterialTheme.typography.bodyMedium)
+                            }
                             Text(
-                                smartAnalysisResult,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 6,
-                                overflow = TextOverflow.Ellipsis
+                                if (smartAnalysisRunning) "点击查看完整分析 · 正在后台更新"
+                                else "点击查看完整分析",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
                             )
-                            Text("点击查看完整分析", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             if (smartAnalysisUpdatedAt > 0L) {
                                 Text(
                                     "更新于 ${java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(smartAnalysisUpdatedAt))}",
@@ -353,12 +422,21 @@ fun HomeScreen(
                                 )
                             }
                         } else {
-                            Text(
-                                smartAnalysisError.ifBlank { "尚无分析结果；首次开启后会立即分析。" },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (smartAnalysisError.isNotBlank()) MaterialTheme.colorScheme.error
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Box(
+                                Modifier.weight(1f).fillMaxWidth(),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    when {
+                                        smartAnalysisRunning -> "正在独立后台进程中分析…"
+                                        smartAnalysisError.isNotBlank() -> smartAnalysisError
+                                        else -> "尚无分析结果；首次开启后会立即分析。"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (smartAnalysisError.isNotBlank()) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
@@ -550,6 +628,16 @@ fun HomeScreen(
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
+                        IconButton(onClick = {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as? ClipboardManager
+                            if (clipboard != null) {
+                                clipboard.setPrimaryClip(ClipData.newPlainText("AI 消费分析报告", smartAnalysisResult))
+                                Toast.makeText(context, "分析结果已复制", Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "复制分析结果")
+                        }
                         TextButton(onClick = { showFullAnalysisDialog = false }) { Text("关闭") }
                     }
                     if (smartAnalysisUpdatedAt > 0L) {

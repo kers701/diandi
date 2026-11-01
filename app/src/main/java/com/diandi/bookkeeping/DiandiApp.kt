@@ -4,7 +4,6 @@ import android.app.Application
 import android.app.ActivityManager
 import android.os.Build
 import android.os.Process
-import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
 import com.diandi.bookkeeping.data.db.AppDatabase
 import com.diandi.bookkeeping.data.repository.BookkeepingRepository
 import com.diandi.bookkeeping.service.AiAnalysisScheduler
@@ -15,9 +14,9 @@ class DiandiApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // KeepAliveService runs in :notify. WorkManager is initialized only in the
-        // default process, so never access it from the notification service process.
-        if (isMainProcess() && AiAnalysisPrefs.isEnabled(this)) {
+        // KeepAliveService and RemoteWorkerService run in :notify and :ai. The default
+        // WorkManager instance is initialized only in the main process.
+        if (isMainProcess()) {
             AiAnalysisScheduler.ensureScheduled(this)
         }
     }

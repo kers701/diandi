@@ -152,9 +152,27 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
 
     suspend fun loadTransaction(id: Long) = repo.getTransaction(id)
 
-    fun addGoal(title: String, target: Double, deadline: String = "") {
+    fun addGoal(
+        title: String,
+        target: Double,
+        allocationWeight: Double = 1.0,
+        deadline: String = ""
+    ) {
         viewModelScope.launch {
-            repo.addGoal(SavingsGoal(title = title, targetAmount = target, deadline = deadline))
+            repo.addGoal(
+                SavingsGoal(
+                    title = title,
+                    targetAmount = target,
+                    allocationWeight = allocationWeight,
+                    deadline = deadline
+                )
+            )
+        }
+    }
+
+    fun updateGoalWeight(goal: SavingsGoal, allocationWeight: Double) {
+        viewModelScope.launch {
+            repo.updateGoal(goal.copy(allocationWeight = allocationWeight))
         }
     }
 

@@ -56,6 +56,11 @@
         </service>
 
         <service
+            android:name="androidx.work.multiprocess.RemoteWorkerService"
+            android:exported="false"
+            android:process=":ai" />
+
+        <service
             android:name=".service.AutoBillNotificationService"
             android:exported="true"
             android:label="点滴自动记账"
@@ -100,4 +105,3 @@
     </queries>
 
 </manifest>
-

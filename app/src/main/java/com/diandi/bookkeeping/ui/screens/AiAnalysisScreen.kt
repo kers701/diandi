@@ -1,5 +1,9 @@
 package com.diandi.bookkeeping.ui.screens
 
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,7 +42,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,19 +50,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
-import com.diandi.bookkeeping.data.ai.SmartConsumptionAnalyzer
 import com.diandi.bookkeeping.service.AiAnalysisScheduler
-import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+@Suppress("DEPRECATION")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     var enabled by remember { mutableStateOf(AiAnalysisPrefs.isEnabled(context)) }
     var dailyTime by remember { mutableStateOf(AiAnalysisPrefs.dailyTime(context)) }
@@ -68,7 +69,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     var lastSuccessAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
     var lastError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
     var enabledModelCount by remember { mutableIntStateOf(AiAnalysisPrefs.enabledCandidates(context).size) }
-    var isAnalyzing by remember { mutableStateOf(false) }
+    var isAnalyzing by remember { mutableStateOf(AiAnalysisPrefs.isAnalyzing(context)) }
     var autoAnalysisAttempted by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
@@ -77,6 +78,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
         lastSuccessAt = AiAnalysisPrefs.lastSuccessAt(context)
         lastError = AiAnalysisPrefs.lastError(context)
         enabledModelCount = AiAnalysisPrefs.enabledCandidates(context).size
+        isAnalyzing = AiAnalysisPrefs.isAnalyzing(context)
     }
 
     fun saveSettings(): String? {
@@ -100,11 +102,11 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
         if (isAnalyzing) return
         isAnalyzing = true
         message = null
-        scope.launch {
-            val success = SmartConsumptionAnalyzer.analyze(context)
+        if (!AiAnalysisScheduler.analyzeNow(context)) {
             refreshState()
-            isAnalyzing = false
-            if (!success) message = lastError.ifBlank { "分析未完成，请检查模型配置和网络后重试。" }
+            message = lastError.ifBlank { "无法将分析加入后台队列，请检查智能分析是否开启。" }
+        } else {
+            message = "分析已加入独立后台进程队列，可离开页面等待完成。"
         }
     }
 
@@ -117,7 +119,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
 
     DisposableEffect(context) {
         val preferences = context.getSharedPreferences(
-            "smart_consumption_analysis", android.content.Context.MODE_PRIVATE
+            "smart_consumption_analysis", android.content.Context.MODE_MULTI_PROCESS
         )
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
             refreshState()
@@ -125,8 +127,28 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
             dailyTime = AiAnalysisPrefs.dailyTime(context)
             outputChars = AiAnalysisPrefs.maxOutputChars(context).toString()
         }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiveContext: android.content.Context?, intent: Intent?) {
+                val update = intent ?: return
+                enabled = update.getBooleanExtra(AiAnalysisPrefs.EXTRA_ENABLED, enabled)
+                analysisText = update.getStringExtra(AiAnalysisPrefs.EXTRA_RESULT) ?: analysisText
+                lastSuccessAt = update.getLongExtra(AiAnalysisPrefs.EXTRA_LAST_SUCCESS_AT, lastSuccessAt)
+                lastError = update.getStringExtra(AiAnalysisPrefs.EXTRA_LAST_ERROR) ?: lastError
+                isAnalyzing = update.getBooleanExtra(AiAnalysisPrefs.EXTRA_ANALYZING, isAnalyzing)
+                enabledModelCount = AiAnalysisPrefs.enabledCandidates(context).size
+            }
+        }
         preferences.registerOnSharedPreferenceChangeListener(listener)
-        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(AiAnalysisPrefs.ACTION_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose {
+            preferences.unregisterOnSharedPreferenceChangeListener(listener)
+            context.unregisterReceiver(receiver)
+        }
     }
 
     Scaffold(
@@ -170,7 +192,6 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                     }
                     Switch(
                         checked = enabled,
-                        enabled = !isAnalyzing,
                         onCheckedChange = { turnOn ->
                             if (turnOn) {
                                 val configError = saveSettings()
