@@ -40,6 +40,8 @@ data class SavingsGoal(
     val deadline: String = "",          // yyyy-MM-dd 或空
     @ColumnInfo(defaultValue = "1.0")
     val allocationWeight: Double = 1.0,
+    @ColumnInfo(defaultValue = "0.0")
+    val lastManualDeposit: Double = 0.0,
     val createdAt: Long = System.currentTimeMillis()
 )
 

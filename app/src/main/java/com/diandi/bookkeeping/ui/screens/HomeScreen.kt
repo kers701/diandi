@@ -11,6 +11,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -285,11 +286,13 @@ fun HomeScreen(
             }
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddClick,
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "添加账单")
+            if (showBillsPage) {
+                FloatingActionButton(
+                    onClick = onAddClick,
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "添加账单")
+                }
             }
         }
     ) { padding ->
@@ -389,10 +392,10 @@ fun HomeScreen(
             if (smartAnalysisEnabled) {
                 Spacer(Modifier.height(8.dp))
                 Card(
-                    modifier = Modifier.fillMaxWidth().weight(1f).clickable {
-                        if (smartAnalysisResult.isNotBlank()) showFullAnalysisDialog = true
-                        else onAiAnalysisClick()
-                    },
+                    modifier = Modifier.fillMaxWidth().weight(1f).then(
+                        if (smartAnalysisResult.isBlank()) Modifier.clickable(onClick = onAiAnalysisClick)
+                        else Modifier
+                    ),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer
                     )
@@ -409,8 +412,11 @@ fun HomeScreen(
                                 Text(smartAnalysisResult, style = MaterialTheme.typography.bodyMedium)
                             }
                             Text(
-                                if (smartAnalysisRunning) "点击查看完整分析 · 正在后台更新"
-                                else "点击查看完整分析",
+                                if (smartAnalysisRunning) "长按查看完整分析 · 正在后台更新"
+                                else "长按查看完整分析",
+                                modifier = Modifier.pointerInput(smartAnalysisResult) {
+                                    detectTapGestures(onLongPress = { showFullAnalysisDialog = true })
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )

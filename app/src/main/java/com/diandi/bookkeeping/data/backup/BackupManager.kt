@@ -174,6 +174,9 @@ object BackupManager {
                 val allocationWeight = item.optDouble("allocationWeight", 1.0).also {
                     require(it.isFinite() && it in 0.01..1000.0) { "目标分配权重无效。" }
                 }
+                val lastManualDeposit = item.optDouble("lastManualDeposit", 0.0).also {
+                    require(it.isFinite() && it >= 0.0) { "最近存入金额无效。" }
+                }
                 SavingsGoal(
                     id = id,
                     title = title,
@@ -181,6 +184,7 @@ object BackupManager {
                     currentAmount = current,
                     deadline = item.getString("deadline"),
                     allocationWeight = allocationWeight,
+                    lastManualDeposit = lastManualDeposit,
                     createdAt = item.getLong("createdAt").also { require(it >= 0) }
                 )
             }
@@ -258,6 +262,7 @@ object BackupManager {
         .put("currentAmount", currentAmount)
         .put("deadline", deadline)
         .put("allocationWeight", allocationWeight)
+        .put("lastManualDeposit", lastManualDeposit)
         .put("createdAt", createdAt)
 
     private fun FundCorrection.toJson() = JSONObject()

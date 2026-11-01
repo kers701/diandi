@@ -13,7 +13,7 @@ import com.diandi.bookkeeping.data.entity.Transaction
 
 @Database(
     entities = [Transaction::class, SavingsGoal::class, FundCorrection::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,7 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "diandi_db"
-                ).addMigrations(MIGRATION_1_2).build()
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
                 INSTANCE = instance
                 instance
             }
@@ -39,6 +39,14 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL(
                     "ALTER TABLE savings_goals ADD COLUMN allocationWeight REAL NOT NULL DEFAULT 1.0"
+                )
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE savings_goals ADD COLUMN lastManualDeposit REAL NOT NULL DEFAULT 0.0"
                 )
             }
         }

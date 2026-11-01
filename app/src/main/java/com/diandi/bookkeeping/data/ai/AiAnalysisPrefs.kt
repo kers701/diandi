@@ -197,6 +197,7 @@ object AiAnalysisPrefs {
         prefs(context).edit()
             .putString(KEY_RESULT, text.take(maxOutputChars(context)))
             .putLong(KEY_LAST_SUCCESS_AT, timestamp)
+            .putBoolean(KEY_ANALYZING, false)
             .remove(KEY_LAST_ERROR)
             .commit()
         notifyStateChanged(context)

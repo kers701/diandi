@@ -170,15 +170,66 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         }
     }
 
-    fun updateGoalWeight(goal: SavingsGoal, allocationWeight: Double) {
+    fun updateGoalDetails(
+        goal: SavingsGoal,
+        title: String,
+        targetAmount: Double,
+        allocationWeight: Double
+    ) {
+        if (title.isBlank() || !targetAmount.isFinite() || targetAmount <= 0.0 ||
+            !allocationWeight.isFinite() || allocationWeight !in 0.01..1000.0
+        ) return
         viewModelScope.launch {
-            repo.updateGoal(goal.copy(allocationWeight = allocationWeight))
+            repo.updateGoal(
+                goal.copy(
+                    title = title.trim(),
+                    targetAmount = targetAmount,
+                    allocationWeight = allocationWeight
+                )
+            )
         }
     }
 
     fun updateGoalProgress(goal: SavingsGoal, addAmount: Double) {
+        if (!addAmount.isFinite() || addAmount <= 0.0) return
         viewModelScope.launch {
-            repo.updateGoal(goal.copy(currentAmount = goal.currentAmount + addAmount))
+            repo.updateGoal(
+                goal.copy(
+                    currentAmount = goal.currentAmount + addAmount,
+                    lastManualDeposit = addAmount
+                )
+            )
+        }
+    }
+
+    fun undoLastGoalDeposit(goal: SavingsGoal) {
+        val undoAmount = minOf(goal.lastManualDeposit.coerceAtLeast(0.0), goal.currentAmount.coerceAtLeast(0.0))
+        if (undoAmount <= 0.0) return
+        viewModelScope.launch {
+            repo.updateGoal(
+                goal.copy(
+                    currentAmount = (goal.currentAmount - undoAmount).coerceAtLeast(0.0),
+                    lastManualDeposit = 0.0
+                )
+            )
+        }
+    }
+
+    fun reduceGoalProgress(goal: SavingsGoal, amount: Double) {
+        if (!amount.isFinite() || amount <= 0.0) return
+        viewModelScope.launch {
+            repo.updateGoal(
+                goal.copy(
+                    currentAmount = (goal.currentAmount - amount).coerceAtLeast(0.0),
+                    lastManualDeposit = 0.0
+                )
+            )
+        }
+    }
+
+    fun resetGoalProgress(goal: SavingsGoal) {
+        viewModelScope.launch {
+            repo.updateGoal(goal.copy(currentAmount = 0.0, lastManualDeposit = 0.0))
         }
     }
 
