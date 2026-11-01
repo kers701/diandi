@@ -19,7 +19,15 @@ interface TransactionDao {
           AND (:endDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) <= :endDate)
           AND (:type IS NULL OR type = :type)
           AND (:categoriesEmpty = 1 OR category IN (:categories))
-          AND (:tagQuery = '' OR tags LIKE '%' || :tagQuery || '%' OR category LIKE '%' || :tagQuery || '%')
+          AND (
+              :tagQuery = ''
+              OR tags LIKE '%' || :tagQuery || '%'
+              OR category LIKE '%' || :tagQuery || '%'
+              OR note LIKE '%' || :tagQuery || '%'
+              OR CAST(amount AS TEXT) LIKE '%' || :tagQuery || '%'
+              OR printf('%.2f', amount) LIKE '%' || :tagQuery || '%'
+              OR printf('%.2f', amount) LIKE '%' || replace(replace(:tagQuery, '¥', ''), '￥', '') || '%'
+          )
         ORDER BY year DESC, month DESC, day DESC, createdAt DESC
     """)
     fun getFiltered(

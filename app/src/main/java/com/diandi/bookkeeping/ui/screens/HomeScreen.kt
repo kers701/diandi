@@ -2,6 +2,7 @@ package com.diandi.bookkeeping.ui.screens
 
 import android.widget.Toast
 import kotlin.math.roundToInt
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -17,10 +20,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
@@ -33,6 +38,7 @@ import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.AppUpdateChecker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,6 +70,8 @@ fun HomeScreen(
     var titleTapCount by remember { mutableIntStateOf(0) }
     var lastTitleTapAt by remember { mutableLongStateOf(0L) }
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    var searchHasFocus by remember { mutableStateOf(false) }
     var transactionToDelete by remember { mutableStateOf<Transaction?>(null) }
     var tagSearch by remember { mutableStateOf(filter.tagQuery) }
     var checkUpdate by remember { mutableStateOf(false) }
@@ -75,6 +83,10 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val balanceAccent = balanceAccentColor(balance)
     val balanceBackground = balanceAccent.copy(alpha = 0.07f)
+
+    BackHandler(enabled = searchHasFocus && !showCategoryEditConfirm && !checkUpdate) {
+        focusManager.clearFocus(force = true)
+    }
 
     LaunchedEffect(Unit) {
         updateCheckRequest++
@@ -217,24 +229,36 @@ fun HomeScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // 标签 / 类目搜索
+            // 支持搜索标签、类目、金额和备注
             OutlinedTextField(
                 value = tagSearch,
                 onValueChange = {
                     tagSearch = it
                     viewModel.updateFilter(tagQuery = it)
                 },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("按标签或类目搜索…") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { searchHasFocus = it.isFocused },
+                placeholder = { Text("搜索类目、标签、金额或备注…") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(
+                    onSearch = { focusManager.clearFocus(force = true) }
+                ),
                 trailingIcon = {
                     if (tagSearch.isNotEmpty()) {
                         IconButton(onClick = {
                             tagSearch = ""
                             viewModel.updateFilter(tagQuery = "")
+                            focusManager.clearFocus(force = true)
                         }) {
                             Icon(Icons.Default.Clear, null)
+                        }
+                    }
+                    if (searchHasFocus) {
+                        IconButton(onClick = { focusManager.clearFocus(force = true) }) {
+                            Icon(Icons.Default.Done, contentDescription = "完成搜索")
                         }
                     }
                 }
@@ -347,7 +371,7 @@ fun HomeScreen(
 
     if (showCategoryEditConfirm) {
         AlertDialog(
-            onDismissRequest = { showCategoryEditConfirm = false },
+            onDismissRequest = {},
             title = { Text("进入类目编辑？") },
             text = { Text("是否进入类目编辑页面？") },
             confirmButton = {
