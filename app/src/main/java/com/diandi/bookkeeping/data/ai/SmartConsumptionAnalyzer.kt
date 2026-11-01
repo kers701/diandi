@@ -164,7 +164,7 @@ object SmartConsumptionAnalyzer {
             }
         }
         val balanceText = String.format(Locale.US, "%.2f", currentBalance)
-        val heading = "分析区间：$startDate 至 $endDate（近 30 天）。账单摘要最多 ${transactions.size} 笔，按时间倒序，超长内容会截断。\n当前账本总余额（全部资金修正 + 累计收入 - 累计支出）：¥$balanceText。这是全账本净余额，与下列每个攒钱目标单独记录的当前金额不同。\n"
+        val heading = "分析区间：$startDate 至 $endDate（近 30 天）。账单摘要最多 ${transactions.size} 笔，按时间倒序，超长内容会截断。\n提示：账单明细可能仅为分析区间内的部分记录，不保证覆盖全部账单。必须根据实际提供的数据判断完整性；若账单不完整，只能分析已提供记录中的消费特征，不得将样本结论描述为整个分析区间的完整统计结果，不得推算未提供账单的金额、占比或消费行为。只有输入明确提供完整统计数据时，才可以对整体消费结构和趋势作出结论。\n当前账本总余额（全部资金修正 + 累计收入 - 累计支出）：¥$balanceText。这是全账本净余额，与下列每个攒钱目标单独记录的当前金额不同。\n"
         val ending = "\n请仅给出简短的消费分析与建议，不需要逐条复述账单。"
         val billsBudget = (MAX_INPUT_CHARS - heading.length - goalText.length - ending.length - 1)
             .coerceAtLeast(0)
