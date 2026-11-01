@@ -10,6 +10,7 @@ import kotlin.math.roundToInt
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -38,6 +40,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +49,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
+import com.diandi.bookkeeping.data.dao.CategoryStat
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.ui.components.BalanceCard
 import com.diandi.bookkeeping.ui.components.TypeChip
@@ -57,7 +61,6 @@ import com.diandi.bookkeeping.util.allocateBalanceByWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,6 +68,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.math.abs
+import kotlin.math.min
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,7 +101,11 @@ fun HomeScreen(
     var smartAnalysisError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
     var smartAnalysisUpdatedAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
     var smartAnalysisRunning by remember { mutableStateOf(AiAnalysisPrefs.isAnalyzing(context)) }
-    var showFullAnalysisDialog by remember { mutableStateOf(false) }
+    val currentMonth = YearMonth.now()
+    val homeCategoryStatsFlow = remember(viewModel, currentMonth) {
+        viewModel.getCategoryDistribution("EXPENSE", currentMonth.year, currentMonth.monthValue, null)
+    }
+    val homeCategoryStats by homeCategoryStatsFlow.collectAsState(initial = emptyList())
     val focusManager = LocalFocusManager.current
     var searchHasFocus by remember { mutableStateOf(false) }
     var scaffoldCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -405,18 +413,34 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text("AI 消费分析", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        if (smartAnalysisRunning) {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
                         if (smartAnalysisResult.isNotBlank()) {
                             Column(
                                 Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
                             ) {
-                                Text(smartAnalysisResult, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    smartAnalysisResult,
+                                    modifier = Modifier.pointerInput(smartAnalysisResult) {
+                                        detectTapGestures(onDoubleTap = {
+                                            val clipboard = context.getSystemService(
+                                                android.content.Context.CLIPBOARD_SERVICE
+                                            ) as? ClipboardManager
+                                            if (clipboard != null) {
+                                                clipboard.setPrimaryClip(
+                                                    ClipData.newPlainText("AI 消费分析结果", smartAnalysisResult)
+                                                )
+                                                Toast.makeText(context, "AI 分析结果已复制", Toast.LENGTH_SHORT).show()
+                                            }
+                                        })
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                             }
                             Text(
-                                if (smartAnalysisRunning) "长按查看完整分析 · 正在后台更新"
-                                else "长按查看完整分析",
-                                modifier = Modifier.pointerInput(smartAnalysisResult) {
-                                    detectTapGestures(onLongPress = { showFullAnalysisDialog = true })
-                                },
+                                if (smartAnalysisRunning) "双击分析文字复制 · 正在后台更新"
+                                else "双击分析文字复制",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -446,6 +470,13 @@ fun HomeScreen(
                         }
                     }
                 }
+            } else {
+                Spacer(Modifier.height(8.dp))
+                HomeCategoryChart(
+                    stats = homeCategoryStats,
+                    month = currentMonth.monthValue,
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                )
             }
             } else {
                 Spacer(Modifier.height(8.dp))
@@ -610,56 +641,6 @@ fun HomeScreen(
         )
     }
 
-    if (showFullAnalysisDialog) {
-        Dialog(onDismissRequest = { showFullAnalysisDialog = false }) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 720.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "完整分析报告",
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        IconButton(onClick = {
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                                as? ClipboardManager
-                            if (clipboard != null) {
-                                clipboard.setPrimaryClip(ClipData.newPlainText("AI 消费分析报告", smartAnalysisResult))
-                                Toast.makeText(context, "分析结果已复制", Toast.LENGTH_SHORT).show()
-                            }
-                        }) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "复制分析结果")
-                        }
-                        TextButton(onClick = { showFullAnalysisDialog = false }) { Text("关闭") }
-                    }
-                    if (smartAnalysisUpdatedAt > 0L) {
-                        Text(
-                            "更新于 ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(smartAnalysisUpdatedAt))}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    HorizontalDivider()
-                    Text(smartAnalysisResult, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-    }
-
     if (checkUpdate) {
         AlertDialog(
             onDismissRequest = { checkUpdate = false },
@@ -761,6 +742,115 @@ fun HomeScreen(
                 TextButton(onClick = { transactionToDelete = null }) { Text("取消") }
             }
         )
+    }
+}
+
+private val HOME_CATEGORY_COLORS = listOf(
+    Color(0xFF5C6BC0), Color(0xFF26A69A), Color(0xFFEF5350),
+    Color(0xFFFFA726), Color(0xFFAB47BC), Color(0xFF42A5F5)
+)
+
+@Composable
+private fun HomeCategoryChart(
+    stats: List<CategoryStat>,
+    month: Int,
+    modifier: Modifier = Modifier
+) {
+    val entries = remember(stats) {
+        val top = stats.take(5)
+        val remainder = stats.drop(5).sumOf { it.total }
+        if (remainder > 0.0) top + CategoryStat("其他", remainder) else top
+    }
+    val total = entries.sumOf { it.total }.coerceAtLeast(0.0001)
+
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("大类分析", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "${month}月支出分布 · 合计 ${formatMoney(entries.sumOf { it.total })}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (entries.isEmpty()) {
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("本月暂无支出分类数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                Row(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Canvas(
+                        modifier = Modifier.weight(1f).fillMaxHeight().aspectRatio(1f).padding(4.dp)
+                    ) {
+                        val diameter = min(size.width, size.height) * 0.94f
+                        val left = (size.width - diameter) / 2f
+                        val top = (size.height - diameter) / 2f
+                        var startAngle = -90f
+                        entries.forEachIndexed { index, entry ->
+                            val sweep = (entry.total / total * 360.0).toFloat()
+                            drawArc(
+                                color = HOME_CATEGORY_COLORS[index % HOME_CATEGORY_COLORS.size],
+                                startAngle = startAngle,
+                                sweepAngle = sweep,
+                                useCenter = true,
+                                topLeft = Offset(left, top),
+                                size = Size(diameter, diameter)
+                            )
+                            startAngle += sweep
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.weight(1.35f).fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        entries.forEachIndexed { index, entry ->
+                            val color = HOME_CATEGORY_COLORS[index % HOME_CATEGORY_COLORS.size]
+                            val fraction = (entry.total / total).toFloat().coerceIn(0f, 1f)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Canvas(Modifier.size(10.dp)) { drawCircle(color) }
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    entry.category,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                                Text(
+                                    "${"%.0f".format(fraction * 100)}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { fraction },
+                                modifier = Modifier.fillMaxWidth().height(4.dp),
+                                color = color
+                            )
+                            Text(
+                                formatMoney(entry.total),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
