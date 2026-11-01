@@ -2,6 +2,8 @@ package com.diandi.bookkeeping.ui.screens
 
 import android.widget.Toast
 import kotlin.math.roundToInt
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
@@ -14,7 +16,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -448,119 +451,125 @@ fun TransactionItem(
     val amountColor = if (isExpense) Color(0xFFD32F2F) else Color(0xFF388E3C)
     val sign = if (isExpense) "-" else "+"
     var revealed by remember { mutableStateOf(false) }
+    var cardHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    // 至少与常见账单行接近，避免尚未测量时高度跳动
+    val minHeight = 64.dp
+    val lockedHeight = if (cardHeightPx > 0) {
+        with(density) { cardHeightPx.toDp() }.coerceAtLeast(minHeight)
+    } else {
+        minHeight
+    }
 
-    if (revealed) {
-        // 左滑后整行展示三个完整操作，不依赖分辨率半露
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            ),
-            elevation = CardDefaults.cardElevation(2.dp)
-        ) {
-            Row(
+    Crossfade(
+        targetState = revealed,
+        animationSpec = tween(durationMillis = 220),
+        label = "bill-actions"
+    ) { showActions ->
+        if (showActions) {
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp, horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                    .height(lockedHeight),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    FilledIconButton(
-                        onClick = { revealed = false },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { revealed = false }) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "退出",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "退出")
                     }
-                    Text("退出", style = MaterialTheme.typography.labelSmall)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    FilledIconButton(
+                    IconButton(
                         onClick = {
                             revealed = false
                             onEdit()
-                        },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
+                        }
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = "编辑")
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "编辑",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
-                    Text("编辑", style = MaterialTheme.typography.labelSmall)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    FilledIconButton(
+                    IconButton(
                         onClick = {
                             revealed = false
                             onDelete()
-                        },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.error
-                        )
+                        }
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除")
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "删除",
+                            tint = MaterialTheme.colorScheme.error
+                        )
                     }
-                    Text("删除", style = MaterialTheme.typography.labelSmall)
                 }
             }
-        }
-    } else {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .pointerInput(tx.id) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = { },
-                        onHorizontalDrag = { _, dragAmount ->
-                            // 左滑超过一定像素即进入操作态
-                            if (dragAmount < -12f) {
-                                revealed = true
-                            }
-                        }
-                    )
-                },
-            elevation = CardDefaults.cardElevation(2.dp)
-        ) {
-            Row(
+        } else {
+            Card(
                 modifier = Modifier
-                    .padding(12.dp)
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxWidth()
+                    .onSizeChanged { cardHeightPx = it.height }
+                    .pointerInput(tx.id) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = { },
+                            onHorizontalDrag = { _, dragAmount ->
+                                if (dragAmount < -12f) {
+                                    revealed = true
+                                }
+                            }
+                        )
+                    },
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        tx.category,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 16.sp
-                    )
-                    if (tx.tags.isNotBlank()) {
+                Row(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "标签: ${tx.tags}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            tx.category,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp
+                        )
+                        if (tx.tags.isNotBlank()) {
+                            Text(
+                                "标签: ${tx.tags}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (tx.note.isNotBlank()) {
+                            Text(
+                                tx.note,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            "${tx.year}-${tx.month.toString().padStart(2, '0')}-${tx.day.toString().padStart(2, '0')}",
+                            fontSize = 11.sp,
+                            color = Color.Gray
                         )
                     }
-                    if (tx.note.isNotBlank()) {
-                        Text(
-                            tx.note,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     Text(
-                        "${tx.year}-${tx.month.toString().padStart(2, '0')}-${tx.day.toString().padStart(2, '0')}",
-                        fontSize = 11.sp,
-                        color = Color.Gray
+                        "$sign${"%.2f".format(tx.amount)}",
+                        color = amountColor,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
                     )
                 }
-                Text(
-                    "$sign${"%.2f".format(tx.amount)}",
-                    color = amountColor,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
             }
         }
     }
