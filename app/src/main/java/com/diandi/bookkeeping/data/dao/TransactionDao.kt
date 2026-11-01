@@ -36,6 +36,14 @@ interface TransactionDao {
     ): List<Transaction>
 
     @Query("""
+        SELECT
+            (SELECT COALESCE(SUM(amount), 0.0) FROM fund_corrections) +
+            (SELECT COALESCE(SUM(amount), 0.0) FROM transactions WHERE type = 'INCOME') -
+            (SELECT COALESCE(SUM(amount), 0.0) FROM transactions WHERE type = 'EXPENSE')
+    """)
+    suspend fun getCurrentLedgerBalance(): Double
+
+    @Query("""
         SELECT * FROM transactions
         WHERE (:startDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) >= :startDate)
           AND (:endDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) <= :endDate)

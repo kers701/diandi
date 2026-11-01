@@ -56,9 +56,10 @@ object SmartConsumptionAnalyzer {
             return false
         }
         val goals = dao.getGoalsForBackup()
-        val userContent = buildUserContent(startDate, today, transactions, goals)
+        val currentBalance = dao.getCurrentLedgerBalance()
+        val userContent = buildUserContent(startDate, today, transactions, goals, currentBalance)
         val maxChars = AiAnalysisPrefs.maxOutputChars(context)
-        val systemContent = "你是个人记账应用中的消费行为分析助手。只依据用户提供的账单与攒钱目标做客观分析，不臆测缺失信息，不提供投资或借贷建议。回复请使用简体中文，最多 $maxChars 个汉字，控制在 3 至 5 条要点：指出消费结构或趋势、给出具体可执行的节流建议；若提供了攒钱目标，再给出与目标相关的储蓄建议。不要复述全部流水，不要追问，不使用表格。"
+        val systemContent = "你是个人记账应用中的消费行为分析助手。只依据用户提供的账单、当前账本总余额与攒钱目标做客观分析，不臆测缺失信息，不提供投资或借贷建议。回复请使用简体中文，最多 $maxChars 个汉字，控制在 3 至 5 条要点：指出消费结构或趋势、给出具体可执行的节流建议；若提供了攒钱目标，再给出与目标相关的储蓄建议。务必区分全账本净余额和每个攒钱目标单独记录的当前金额；若目标当前金额为0但账本总余额大于0，不要说整体积蓄为0，应说明目标尚未单独分配进度，并可建议从现有余额中划拨。不要复述全部流水，不要追问，不使用表格。"
         val failures = mutableListOf<String>()
 
         for (candidate in candidates) {
@@ -123,7 +124,8 @@ object SmartConsumptionAnalyzer {
         startDate: LocalDate,
         endDate: LocalDate,
         transactions: List<Transaction>,
-        goals: List<SavingsGoal>
+        goals: List<SavingsGoal>,
+        currentBalance: Double
     ): String {
         val bills = buildString {
             transactions.forEach { tx ->
@@ -154,7 +156,8 @@ object SmartConsumptionAnalyzer {
                 }
             }
         }
-        val heading = "分析区间：$startDate 至 $endDate（近 30 天）。账单摘要最多 ${transactions.size} 笔，按时间倒序，超长内容会截断：\n"
+        val balanceText = String.format(Locale.US, "%.2f", currentBalance)
+        val heading = "分析区间：$startDate 至 $endDate（近 30 天）。账单摘要最多 ${transactions.size} 笔，按时间倒序，超长内容会截断。\n当前账本总余额（全部资金修正 + 累计收入 - 累计支出）：¥$balanceText。这是全账本净余额，与下列每个攒钱目标单独记录的当前金额不同。\n"
         val ending = "\n请仅给出简短的消费分析与建议，不需要逐条复述账单。"
         val billsBudget = (MAX_INPUT_CHARS - heading.length - goalText.length - ending.length - 1)
             .coerceAtLeast(0)

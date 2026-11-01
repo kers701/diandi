@@ -49,6 +49,7 @@ import com.diandi.bookkeeping.util.AppUpdateChecker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
@@ -86,6 +87,7 @@ fun HomeScreen(
     var smartAnalysisResult by remember { mutableStateOf(AiAnalysisPrefs.result(context)) }
     var smartAnalysisError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
     var smartAnalysisUpdatedAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
+    var showFullAnalysisDialog by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     var searchHasFocus by remember { mutableStateOf(false) }
     var scaffoldCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -303,7 +305,10 @@ fun HomeScreen(
             if (smartAnalysisEnabled) {
                 Spacer(Modifier.height(8.dp))
                 Card(
-                    modifier = Modifier.fillMaxWidth().clickable(onClick = onAiAnalysisClick),
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        if (smartAnalysisResult.isNotBlank()) showFullAnalysisDialog = true
+                        else onAiAnalysisClick()
+                    },
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer
                     )
@@ -496,6 +501,43 @@ fun HomeScreen(
                 }
             }
         )
+    }
+
+    if (showFullAnalysisDialog) {
+        Dialog(onDismissRequest = { showFullAnalysisDialog = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 720.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "完整分析报告",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TextButton(onClick = { showFullAnalysisDialog = false }) { Text("关闭") }
+                    }
+                    if (smartAnalysisUpdatedAt > 0L) {
+                        Text(
+                            "更新于 ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(smartAnalysisUpdatedAt))}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    HorizontalDivider()
+                    Text(smartAnalysisResult, style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
     }
 
     if (checkUpdate) {
