@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.ui.components.TypeChip
@@ -22,12 +23,13 @@ fun AddScreen(
     initialType: String? = null,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     var type by remember { mutableStateOf(initialType ?: "EXPENSE") }
     var amountText by remember { mutableStateOf("") }
     var category by remember {
         mutableStateOf(
-            if (initialType == "INCOME") Categories.incomeCategories.first()
-            else Categories.expenseCategories.first()
+            if (initialType == "INCOME") Categories.income(context).first()
+            else Categories.expense(context).first()
         )
     }
     var tags by remember { mutableStateOf("") }
@@ -35,7 +37,7 @@ fun AddScreen(
     var date by remember { mutableStateOf(LocalDate.now()) }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    val categories = Categories.getByType(type)
+    val categories = Categories.getByType(context, type)
 
     Scaffold(
         topBar = {
@@ -61,11 +63,11 @@ fun AddScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TypeChip("支出", type == "EXPENSE", Color(0xFFD32F2F)) {
                     type = "EXPENSE"
-                    category = Categories.expenseCategories.first()
+                    category = Categories.expense(context).first()
                 }
                 TypeChip("收入", type == "INCOME", Color(0xFF388E3C)) {
                     type = "INCOME"
-                    category = Categories.incomeCategories.first()
+                    category = Categories.income(context).first()
                 }
             }
 

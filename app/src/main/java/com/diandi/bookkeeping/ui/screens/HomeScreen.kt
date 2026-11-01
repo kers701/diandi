@@ -1,3 +1,4 @@
+import android.widget.Toast
 package com.diandi.bookkeeping.ui.screens
 
 import androidx.compose.foundation.clickable
@@ -40,7 +41,8 @@ fun HomeScreen(
     onChartsClick: () -> Unit,
     onGoalsClick: () -> Unit,
     onCorrectionClick: () -> Unit,
-    onAboutClick: () -> Unit = {}
+    onAboutClick: () -> Unit = {},
+    onCategoryEditClick: () -> Unit = {}
 ) {
     val transactions by viewModel.transactions.collectAsState()
     val balance by viewModel.balance.collectAsState()
@@ -49,13 +51,15 @@ fun HomeScreen(
     val filter by viewModel.filter.collectAsState()
 
     var showFilterSheet by remember { mutableStateOf(false) }
+    var titleTapCount by remember { mutableIntStateOf(0) }
+    var lastTitleTapAt by remember { mutableLongStateOf(0L) }
+    val context = LocalContext.current
     var transactionToDelete by remember { mutableStateOf<Transaction?>(null) }
     var tagSearch by remember { mutableStateOf(filter.tagQuery) }
     var checkUpdate by remember { mutableStateOf(false) }
     var updateMsg by remember { mutableStateOf<String?>(null) }
     var updateInfo by remember { mutableStateOf<AppUpdateChecker.ReleaseInfo?>(null) }
     var downloading by remember { mutableStateOf(false) }
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val balanceAccent = balanceAccentColor(balance)
     val balanceBackground = balanceAccent.copy(alpha = 0.07f)
@@ -64,7 +68,21 @@ fun HomeScreen(
         containerColor = balanceBackground,
         topBar = {
             TopAppBar(
-                title = { Text("点滴", fontWeight = FontWeight.Bold) },
+                title = {
+                    Text(
+                        "点滴",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            val now = System.currentTimeMillis()
+                            titleTapCount = if (now - lastTitleTapAt > 2000L) 1 else titleTapCount + 1
+                            lastTitleTapAt = now
+                            if (titleTapCount >= 7) {
+                                titleTapCount = 0
+                                onCategoryEditClick()
+                            }
+                        }
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = balanceBackground),
                 actions = {
                     IconButton(onClick = onChartsClick) {
@@ -479,11 +497,12 @@ fun FilterBottomSheet(
     var selectingStart by remember { mutableStateOf(true) }
     var showCategoryPicker by remember { mutableStateOf(false) }
     // 大类列表跟随支出/收入类型；未选类型时显示全部
-    val selectableCategories = remember(selectedType) {
+    val filterContext = LocalContext.current
+    val selectableCategories = remember(selectedType, filterContext) {
         when (selectedType) {
-            "EXPENSE" -> Categories.expenseCategories
-            "INCOME" -> Categories.incomeCategories
-            else -> (Categories.expenseCategories + Categories.incomeCategories).distinct()
+            "EXPENSE" -> Categories.expense(filterContext)
+            "INCOME" -> Categories.income(filterContext)
+            else -> (Categories.expense(filterContext) + Categories.income(filterContext)).distinct()
         }
     }
 
@@ -498,11 +517,11 @@ fun FilterBottomSheet(
                 }
                 TypeChip("支出", selectedType == "EXPENSE", Color(0xFFD32F2F)) {
                     selectedType = "EXPENSE"
-                    categories = categories.intersect(Categories.expenseCategories.toSet())
+                    categories = categories.intersect(Categories.expense(filterContext).toSet())
                 }
                 TypeChip("收入", selectedType == "INCOME", Color(0xFF388E3C)) {
                     selectedType = "INCOME"
-                    categories = categories.intersect(Categories.incomeCategories.toSet())
+                    categories = categories.intersect(Categories.income(filterContext).toSet())
                 }
             }
             Spacer(Modifier.height(8.dp))

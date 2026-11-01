@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -84,13 +85,14 @@ private fun QuickAddScreen(
     onSave: (amount: Double, type: String, category: String, tags: String, note: String) -> Unit,
     onClose: () -> Unit
 ) {
+    val context = LocalContext.current
     var type by remember { mutableStateOf("EXPENSE") }
     var amountText by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf(Categories.expenseCategories.first()) }
+    var category by remember { mutableStateOf(Categories.expense(context).first()) }
     var tags by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     val categories =
-        if (type == "EXPENSE") Categories.expenseCategories else Categories.incomeCategories
+        if (type == "EXPENSE") Categories.expense(context) else Categories.income(context)
 
     Scaffold(
         topBar = {
@@ -115,11 +117,11 @@ private fun QuickAddScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TypeChip("支出", type == "EXPENSE", Color(0xFFD32F2F)) {
                     type = "EXPENSE"
-                    category = Categories.expenseCategories.first()
+                    category = Categories.expense(context).first()
                 }
                 TypeChip("收入", type == "INCOME", Color(0xFF388E3C)) {
                     type = "INCOME"
-                    category = Categories.incomeCategories.first()
+                    category = Categories.income(context).first()
                 }
             }
             OutlinedTextField(

@@ -11,6 +11,8 @@ object AppPrefs {
     private const val FILE_AUTO_BILL_KEYWORDS_ALLOW = "auto_bill_keywords_allow"
     private const val FILE_AUTO_BILL_KEYWORDS_BLOCK = "auto_bill_keywords_block"
     private const val FILE_AUTO_BILL_SEEN = "auto_bill_seen"
+    private const val FILE_CAT_EXPENSE = "categories_expense"
+    private const val FILE_CAT_INCOME = "categories_income"
     private const val MAX_SEEN = 240
     private const val DEDUP_WINDOW_MS = 3 * 60 * 1000L
 
@@ -86,6 +88,57 @@ object AppPrefs {
 
     private fun writeLines(file: File, values: Set<String>) {
         file.writeText(values.filter { it.isNotBlank() }.sorted().joinToString("\n"))
+    }
+
+
+    private fun expenseCatFile(context: Context): File =
+        File(context.applicationContext.filesDir, FILE_CAT_EXPENSE)
+
+    private fun incomeCatFile(context: Context): File =
+        File(context.applicationContext.filesDir, FILE_CAT_INCOME)
+
+    fun getExpenseCategories(context: Context): List<String> {
+        val saved = readCategoryLines(expenseCatFile(context))
+        return saved.ifEmpty { Categories.defaultExpense }
+    }
+
+    fun getIncomeCategories(context: Context): List<String> {
+        val saved = readCategoryLines(incomeCatFile(context))
+        return saved.ifEmpty { Categories.defaultIncome }
+    }
+
+    fun setExpenseCategories(context: Context, list: List<String>) {
+        writeCategoryLines(expenseCatFile(context), list)
+    }
+
+    fun setIncomeCategories(context: Context, list: List<String>) {
+        writeCategoryLines(incomeCatFile(context), list)
+    }
+
+    fun restoreExpenseCategories(context: Context) {
+        expenseCatFile(context).delete()
+    }
+
+    fun restoreIncomeCategories(context: Context) {
+        incomeCatFile(context).delete()
+    }
+
+    fun restoreAllCategories(context: Context) {
+        restoreExpenseCategories(context)
+        restoreIncomeCategories(context)
+    }
+
+    private fun readCategoryLines(file: File): List<String> =
+        file.takeIf { it.exists() }
+            ?.readLines()
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.distinct()
+            ?: emptyList()
+
+    private fun writeCategoryLines(file: File, values: List<String>) {
+        val cleaned = values.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        file.writeText(cleaned.joinToString("\n"))
     }
 
     @Synchronized
