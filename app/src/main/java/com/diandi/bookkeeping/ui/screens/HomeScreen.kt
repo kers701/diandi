@@ -20,7 +20,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
@@ -72,6 +77,8 @@ fun HomeScreen(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     var searchHasFocus by remember { mutableStateOf(false) }
+    var scaffoldCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var searchFieldCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var transactionToDelete by remember { mutableStateOf<Transaction?>(null) }
     var tagSearch by remember { mutableStateOf(filter.tagQuery) }
     var checkUpdate by remember { mutableStateOf(false) }
@@ -122,6 +129,31 @@ fun HomeScreen(
     }
 
     Scaffold(
+        modifier = Modifier
+            .onGloballyPositioned { scaffoldCoordinates = it }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val down = event.changes.firstOrNull { it.pressed && !it.previousPressed }
+                            ?: continue
+                        if (!searchHasFocus) continue
+
+                        val scaffold = scaffoldCoordinates ?: continue
+                        val searchField = searchFieldCoordinates ?: continue
+                        if (!scaffold.isAttached || !searchField.isAttached) continue
+
+                        val topLeft = scaffold.localPositionOf(searchField, Offset.Zero)
+                        val bottomRight = Offset(
+                            topLeft.x + searchField.size.width.toFloat(),
+                            topLeft.y + searchField.size.height.toFloat()
+                        )
+                        if (!Rect(topLeft, bottomRight).contains(down.position)) {
+                            focusManager.clearFocus(force = true)
+                        }
+                    }
+                }
+            },
         containerColor = balanceBackground,
         topBar = {
             TopAppBar(
@@ -238,7 +270,8 @@ fun HomeScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .onFocusChanged { searchHasFocus = it.isFocused },
+                    .onFocusChanged { searchHasFocus = it.isFocused }
+                    .onGloballyPositioned { searchFieldCoordinates = it },
                 placeholder = { Text("搜索类目、标签、金额或备注…") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 singleLine = true,
@@ -255,11 +288,6 @@ fun HomeScreen(
                                 focusManager.clearFocus(force = true)
                             }) {
                                 Icon(Icons.Default.Clear, contentDescription = "清除搜索")
-                            }
-                        }
-                        if (searchHasFocus) {
-                            IconButton(onClick = { focusManager.clearFocus(force = true) }) {
-                                Icon(Icons.Default.Done, contentDescription = "完成搜索")
                             }
                         }
                     }
