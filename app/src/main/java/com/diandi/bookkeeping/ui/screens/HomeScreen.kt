@@ -60,6 +60,7 @@ fun HomeScreen(
     val filter by viewModel.filter.collectAsState()
 
     var showFilterSheet by remember { mutableStateOf(false) }
+    var showCategoryEditConfirm by remember { mutableStateOf(false) }
     var titleTapCount by remember { mutableIntStateOf(0) }
     var lastTitleTapAt by remember { mutableLongStateOf(0L) }
     val context = LocalContext.current
@@ -122,7 +123,7 @@ fun HomeScreen(
                             lastTitleTapAt = now
                             if (titleTapCount >= 7) {
                                 titleTapCount = 0
-                                onCategoryEditClick()
+                                showCategoryEditConfirm = true
                             }
                         }
                     )
@@ -343,6 +344,27 @@ fun HomeScreen(
         }
     }
 
+
+    if (showCategoryEditConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCategoryEditConfirm = false },
+            title = { Text("进入类目编辑？") },
+            text = { Text("是否进入类目编辑页面？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCategoryEditConfirm = false
+                    onCategoryEditClick()
+                }) {
+                    Text("进入")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCategoryEditConfirm = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 
     if (checkUpdate) {
         AlertDialog(
