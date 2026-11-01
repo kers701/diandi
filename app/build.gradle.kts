@@ -28,8 +28,8 @@ android {
         applicationId = "com.diandi.bookkeeping"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2000
-        versionName = "2.0.0"
+        versionCode = 2001
+        versionName = "2.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

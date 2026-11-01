@@ -2,7 +2,7 @@ package com.diandi.bookkeeping.data.ai
 
 import android.content.Context
 
-/** 智能消费分析的私有本机设置与最近一次结果。API Key 不进入账单备份文件。 */
+/** 智能消费分析的本机配置与最近结果；API Key 不写入账单备份。 */
 object AiAnalysisPrefs {
     private const val PREFS_NAME = "smart_consumption_analysis"
     private const val KEY_ENABLED = "enabled"
@@ -10,6 +10,9 @@ object AiAnalysisPrefs {
     private const val KEY_BASE_URL = "base_url"
     private const val KEY_MODEL = "model"
     private const val KEY_DAILY_TIME = "daily_time"
+    private const val KEY_PROVIDERS_JSON = "providers_json"
+    private const val KEY_MODELS_JSON = "models_json"
+    private const val KEY_MAX_OUTPUT_CHARS = "max_output_chars"
     private const val KEY_RESULT = "result"
     private const val KEY_LAST_SUCCESS_AT = "last_success_at"
     private const val KEY_LAST_ERROR = "last_error"
@@ -17,6 +20,11 @@ object AiAnalysisPrefs {
     const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
     const val DEFAULT_MODEL = "gpt-4o-mini"
     const val DEFAULT_DAILY_TIME = "20:00"
+    const val DEFAULT_MAX_OUTPUT_CHARS = 500
+    const val MIN_OUTPUT_CHARS = 100
+    const val MAX_OUTPUT_CHARS = 999
+
+    data class Candidate(val provider: AiProviderConfig, val model: AiModelEntry)
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -34,13 +42,128 @@ object AiAnalysisPrefs {
     fun dailyTime(context: Context): String =
         prefs(context).getString(KEY_DAILY_TIME, DEFAULT_DAILY_TIME).orEmpty().ifBlank { DEFAULT_DAILY_TIME }
 
-    fun saveConfiguration(
-        context: Context,
-        apiKey: String,
-        baseUrl: String,
-        model: String,
-        dailyTime: String
-    ) {
+    /** 旧版单服务商配置仅在新版配置键从未写入时迁移显示。 */
+    fun providers(context: Context): List<AiProviderConfig> {
+        val preferences = prefs(context)
+        if (preferences.contains(KEY_PROVIDERS_JSON)) {
+            return AiModelConfigCodec.providersFromJson(preferences.getString(KEY_PROVIDERS_JSON, "[]"))
+        }
+        val legacyKey = apiKey(context).trim()
+        if (legacyKey.isBlank()) return emptyList()
+        val legacyModel = model(context).trim()
+        return listOf(
+            AiProviderConfig(
+                id = "legacy",
+                name = "默认提供商",
+                apiKey = legacyKey,
+                baseUrl = baseUrl(context),
+                modelNamesText = legacyModel
+            )
+        )
+    }
+
+    /** 旧配置可迁移为一个提供商和一个默认模型。 */
+    fun models(context: Context): List<AiModelEntry> {
+        val preferences = prefs(context)
+        if (preferences.contains(KEY_MODELS_JSON)) {
+            return AiModelConfigCodec.modelsFromJson(preferences.getString(KEY_MODELS_JSON, "[]"))
+                .sortedBy { it.priority }
+        }
+        var priority = 0
+        return providers(context).flatMap { provider ->
+            val names = provider.modelNames().ifEmpty {
+                if (provider.id == "legacy") listOf(model(context).trim()).filter { it.isNotBlank() }
+                else emptyList()
+            }
+            names.map { name ->
+                AiModelEntry(providerId = provider.id, modelName = name, priority = priority++)
+            }
+        }
+    }
+
+    fun enabledCandidates(context: Context): List<Candidate> {
+        val providerMap = providers(context)
+            .filter { it.enabled && it.apiKey.isNotBlank() && it.baseUrl.startsWith("https://", true) }
+            .associateBy { it.id }
+        return models(context)
+            .filter { it.enabled && it.modelName.isNotBlank() }
+            .sortedBy { it.priority }
+            .mapNotNull { model -> providerMap[model.providerId]?.let { Candidate(it, model) } }
+    }
+
+    /** 保存提供商并将新写入的手动模型合并进模型组，保留现有开关和顺序。 */
+    fun saveProviders(context: Context, providers: List<AiProviderConfig>) {
+        val oldModels = models(context)
+        val validIds = providers.map { it.id }.toSet()
+        val nextModels = oldModels.filter { it.providerId in validIds }.toMutableList()
+        val keys = nextModels.map { "${it.providerId}::${it.modelName}" }.toMutableSet()
+        var nextPriority = (nextModels.maxOfOrNull { it.priority } ?: -1) + 1
+        providers.forEach { provider ->
+            provider.modelNames().forEach { name ->
+                if (keys.add("${provider.id}::$name")) {
+                    nextModels += AiModelEntry(
+                        providerId = provider.id,
+                        modelName = name,
+                        priority = nextPriority++
+                    )
+                }
+            }
+        }
+        prefs(context).edit()
+            .putString(KEY_PROVIDERS_JSON, AiModelConfigCodec.providersToJson(providers))
+            .putString(KEY_MODELS_JSON, AiModelConfigCodec.modelsToJson(nextModels))
+            .apply()
+    }
+
+    fun saveModels(context: Context, models: List<AiModelEntry>) {
+        prefs(context).edit()
+            .putString(KEY_MODELS_JSON, AiModelConfigCodec.modelsToJson(models))
+            .apply()
+    }
+
+    /** 合并服务商从 /models 拉取的名称；已存在模型的启用状态和顺序不变。 */
+    fun mergeProviderModels(context: Context, providerId: String, names: List<String>): Int {
+        val cleanNames = names.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (cleanNames.isEmpty()) return 0
+        val currentProviders = providers(context)
+        val provider = currentProviders.firstOrNull { it.id == providerId } ?: return 0
+        val currentModels = models(context).toMutableList()
+        val keys = currentModels.map { "${it.providerId}::${it.modelName}" }.toMutableSet()
+        var priority = (currentModels.maxOfOrNull { it.priority } ?: -1) + 1
+        var added = 0
+        cleanNames.forEach { name ->
+            if (keys.add("$providerId::$name")) {
+                currentModels += AiModelEntry(providerId = providerId, modelName = name, priority = priority++)
+                added++
+            }
+        }
+        val mergedNames = (provider.modelNames() + cleanNames).distinct()
+        val updatedProviders = currentProviders.map {
+            if (it.id == providerId) it.copy(modelNamesText = mergedNames.joinToString("\n")) else it
+        }
+        prefs(context).edit()
+            .putString(KEY_PROVIDERS_JSON, AiModelConfigCodec.providersToJson(updatedProviders))
+            .putString(KEY_MODELS_JSON, AiModelConfigCodec.modelsToJson(currentModels))
+            .apply()
+        return added
+    }
+
+    fun setDailyTime(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_DAILY_TIME, value.trim()).apply()
+    }
+
+    fun maxOutputChars(context: Context): Int = prefs(context)
+        .getInt(KEY_MAX_OUTPUT_CHARS, DEFAULT_MAX_OUTPUT_CHARS)
+        .coerceIn(MIN_OUTPUT_CHARS, MAX_OUTPUT_CHARS)
+
+    fun setMaxOutputChars(context: Context, value: Int) {
+        prefs(context).edit()
+            .putInt(KEY_MAX_OUTPUT_CHARS, value.coerceIn(MIN_OUTPUT_CHARS, MAX_OUTPUT_CHARS))
+            .apply()
+    }
+
+    /** 保留旧配置写入方法，便于兼容尚未迁移的安装版本。 */
+    fun saveConfiguration(context: Context, apiKey: String, baseUrl: String, model: String, dailyTime: String) {
         prefs(context).edit()
             .putString(KEY_API_KEY, apiKey.trim())
             .putString(KEY_BASE_URL, baseUrl.trim().trimEnd('/'))
@@ -55,7 +178,7 @@ object AiAnalysisPrefs {
 
     fun saveResult(context: Context, text: String, timestamp: Long = System.currentTimeMillis()) {
         prefs(context).edit()
-            .putString(KEY_RESULT, text.take(500))
+            .putString(KEY_RESULT, text.take(maxOutputChars(context)))
             .putLong(KEY_LAST_SUCCESS_AT, timestamp)
             .remove(KEY_LAST_ERROR)
             .apply()

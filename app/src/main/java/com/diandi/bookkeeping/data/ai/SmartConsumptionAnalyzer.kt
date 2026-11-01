@@ -2,6 +2,7 @@ package com.diandi.bookkeeping.data.ai
 
 import android.content.Context
 import com.diandi.bookkeeping.data.db.AppDatabase
+import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.data.entity.Transaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -19,12 +20,11 @@ import java.time.LocalDate
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-/** 每次只发送一组 system/user messages，不保存或续接历史对话。 */
+/** 每次请求都是新对话；候选模型按模型组次序逐一回退。 */
 object SmartConsumptionAnalyzer {
     private const val MAX_TRANSACTIONS = 120
     private const val MAX_INPUT_CHARS = 12000
-    private const val MAX_REPLY_CHARS = 500
-    private const val MAX_OUTPUT_TOKENS = 600
+    private const val MAX_OUTPUT_TOKENS = 2000
     private val mutex = Mutex()
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -39,19 +39,9 @@ object SmartConsumptionAnalyzer {
     private suspend fun analyzeLocked(context: Context): Boolean {
         if (!AiAnalysisPrefs.isEnabled(context)) return false
         AiAnalysisPrefs.saveError(context, "")
-        val apiKey = AiAnalysisPrefs.apiKey(context).trim()
-        if (apiKey.isBlank()) {
-            AiAnalysisPrefs.saveError(context, "请先填写 AI API Key。")
-            return false
-        }
-        val model = AiAnalysisPrefs.model(context).trim()
-        if (model.isBlank()) {
-            AiAnalysisPrefs.saveError(context, "请先填写 AI 模型名称。")
-            return false
-        }
-        val baseUrl = AiAnalysisPrefs.baseUrl(context).trim().trimEnd('/')
-        if (!baseUrl.startsWith("https://", ignoreCase = true)) {
-            AiAnalysisPrefs.saveError(context, "为保护 API Key 和账单数据，Base URL 必须使用 HTTPS。")
+        val candidates = AiAnalysisPrefs.enabledCandidates(context)
+        if (candidates.isEmpty()) {
+            AiAnalysisPrefs.saveError(context, "没有可用模型：请在模型配置中启用提供商和模型，并填写 API Key。")
             return false
         }
 
@@ -67,42 +57,65 @@ object SmartConsumptionAnalyzer {
         }
         val goals = dao.getGoalsForBackup()
         val userContent = buildUserContent(startDate, today, transactions, goals)
-        val systemContent = "你是个人记账应用中的消费行为分析助手。只依据用户提供的账单与攒钱目标做客观分析，不臆测缺失信息，不提供投资或借贷建议。回复请使用简体中文，最多 500 个汉字，控制在 3 至 5 条要点：指出消费结构或趋势、给出具体可执行的节流建议；若提供了攒钱目标，再给出与目标相关的储蓄建议。不要复述全部流水，不要追问，不使用表格。"
+        val maxChars = AiAnalysisPrefs.maxOutputChars(context)
+        val systemContent = "你是个人记账应用中的消费行为分析助手。只依据用户提供的账单与攒钱目标做客观分析，不臆测缺失信息，不提供投资或借贷建议。回复请使用简体中文，最多 $maxChars 个汉字，控制在 3 至 5 条要点：指出消费结构或趋势、给出具体可执行的节流建议；若提供了攒钱目标，再给出与目标相关的储蓄建议。不要复述全部流水，不要追问，不使用表格。"
+        val failures = mutableListOf<String>()
 
-        return try {
-            val messages = JSONArray()
-                .put(JSONObject().put("role", "system").put("content", systemContent))
-                .put(JSONObject().put("role", "user").put("content", userContent))
-            val requestJson = JSONObject()
-                .put("model", model)
-                .put("messages", messages)
-                .put("temperature", 0.2)
-                .put("max_tokens", MAX_OUTPUT_TOKENS)
-            val request = Request.Builder()
-                .url("$baseUrl/chat/completions")
-                .header("Authorization", "Bearer $apiKey")
-                .header("Content-Type", "application/json")
-                .post(requestJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-            val responseText = httpClient.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) throw IOException("AI 请求失败：HTTP ${response.code}")
-                JSONObject(body)
-                    .optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("message")
-                    ?.optString("content")
-                    ?.trim()
-                    .orEmpty()
+        for (candidate in candidates) {
+            try {
+                val response = request(candidate, systemContent, userContent, maxChars)
+                if (response.isNotBlank()) {
+                    AiAnalysisPrefs.saveResult(context, response.take(maxChars))
+                    return true
+                }
+                failures += "${candidate.model.modelName}: 空回复"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failures += "${candidate.model.modelName}: ${e.message.orEmpty().take(80)}"
             }
-            if (responseText.isBlank()) throw IOException("AI 未返回分析内容，请检查模型配置后重试。")
-            AiAnalysisPrefs.saveResult(context, responseText.take(MAX_REPLY_CHARS))
-            true
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            AiAnalysisPrefs.saveError(context, e.message?.take(240).orEmpty().ifBlank { "AI 请求失败，请检查网络和模型配置。" })
-            false
+        }
+        AiAnalysisPrefs.saveError(
+            context,
+            "所有已启用模型均未返回有效分析。" + failures.joinToString("；").take(180)
+        )
+        return false
+    }
+
+    private fun request(
+        candidate: AiAnalysisPrefs.Candidate,
+        systemContent: String,
+        userContent: String,
+        maxChars: Int
+    ): String {
+        val baseUrl = candidate.provider.baseUrl.trim().trimEnd('/')
+        if (!baseUrl.startsWith("https://", ignoreCase = true)) {
+            throw IOException("Base URL 必须使用 HTTPS")
+        }
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", systemContent))
+            .put(JSONObject().put("role", "user").put("content", userContent))
+        val requestJson = JSONObject()
+            .put("model", candidate.model.modelName)
+            .put("messages", messages)
+            .put("temperature", 0.2)
+            .put("max_tokens", (maxChars * 2).coerceIn(256, MAX_OUTPUT_TOKENS))
+        val request = Request.Builder()
+            .url("$baseUrl/chat/completions")
+            .header("Authorization", "Bearer ${candidate.provider.apiKey.trim()}")
+            .header("Content-Type", "application/json")
+            .post(requestJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+        return httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+            JSONObject(body)
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content")
+                ?.trim()
+                .orEmpty()
         }
     }
 
@@ -110,7 +123,7 @@ object SmartConsumptionAnalyzer {
         startDate: LocalDate,
         endDate: LocalDate,
         transactions: List<Transaction>,
-        goals: List<com.diandi.bookkeeping.data.entity.SavingsGoal>
+        goals: List<SavingsGoal>
     ): String {
         val bills = buildString {
             transactions.forEach { tx ->

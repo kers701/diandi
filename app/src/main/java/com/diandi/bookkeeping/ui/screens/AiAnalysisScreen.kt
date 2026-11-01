@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,7 +32,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,11 +42,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
 import com.diandi.bookkeeping.data.ai.SmartConsumptionAnalyzer
 import com.diandi.bookkeeping.service.AiAnalysisScheduler
@@ -55,38 +57,40 @@ import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AiAnalysisScreen(onBack: () -> Unit) {
+fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var enabled by remember { mutableStateOf(AiAnalysisPrefs.isEnabled(context)) }
-    var apiKey by remember { mutableStateOf(AiAnalysisPrefs.apiKey(context)) }
-    var baseUrl by remember { mutableStateOf(AiAnalysisPrefs.baseUrl(context)) }
-    var model by remember { mutableStateOf(AiAnalysisPrefs.model(context)) }
     var dailyTime by remember { mutableStateOf(AiAnalysisPrefs.dailyTime(context)) }
+    var outputChars by remember { mutableStateOf(AiAnalysisPrefs.maxOutputChars(context).toString()) }
     var analysisText by remember { mutableStateOf(AiAnalysisPrefs.result(context)) }
     var lastSuccessAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
     var lastError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
+    var enabledModelCount by remember { mutableIntStateOf(AiAnalysisPrefs.enabledCandidates(context).size) }
     var isAnalyzing by remember { mutableStateOf(false) }
+    var autoAnalysisAttempted by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
-    fun refreshResult() {
+    fun refreshState() {
         analysisText = AiAnalysisPrefs.result(context)
         lastSuccessAt = AiAnalysisPrefs.lastSuccessAt(context)
         lastError = AiAnalysisPrefs.lastError(context)
+        enabledModelCount = AiAnalysisPrefs.enabledCandidates(context).size
     }
 
-    fun saveConfiguration(requireApiKey: Boolean): String? {
+    fun saveSettings(): String? {
         val parsedTime = runCatching { LocalTime.parse(dailyTime.trim()) }.getOrNull()
+        val parsedChars = outputChars.toIntOrNull()
         return when {
-            requireApiKey && apiKey.isBlank() -> "请先填写 API Key。"
-            baseUrl.isBlank() || !baseUrl.trim().startsWith("https://", ignoreCase = true) ->
-                "请填写有效的 HTTPS Base URL。"
-            model.isBlank() -> "请填写模型名称。"
             parsedTime == null -> "时间格式无效，请使用 20:00 这样的 HH:mm 格式。"
+            parsedChars == null || parsedChars !in AiAnalysisPrefs.MIN_OUTPUT_CHARS..AiAnalysisPrefs.MAX_OUTPUT_CHARS ->
+                "最大输出字数须为 ${AiAnalysisPrefs.MIN_OUTPUT_CHARS}–${AiAnalysisPrefs.MAX_OUTPUT_CHARS}。"
             else -> {
                 dailyTime = parsedTime.format(DateTimeFormatter.ofPattern("HH:mm"))
-                AiAnalysisPrefs.saveConfiguration(context, apiKey, baseUrl, model, dailyTime)
+                outputChars = parsedChars.toString()
+                AiAnalysisPrefs.setDailyTime(context, dailyTime)
+                AiAnalysisPrefs.setMaxOutputChars(context, parsedChars)
                 null
             }
         }
@@ -98,9 +102,16 @@ fun AiAnalysisScreen(onBack: () -> Unit) {
         message = null
         scope.launch {
             val success = SmartConsumptionAnalyzer.analyze(context)
-            refreshResult()
+            refreshState()
             isAnalyzing = false
-            if (!success) message = lastError.ifBlank { "分析未完成，请检查 AI 配置和网络后重试。" }
+            if (!success) message = lastError.ifBlank { "分析未完成，请检查模型配置和网络后重试。" }
+        }
+    }
+
+    LaunchedEffect(enabled, enabledModelCount, analysisText) {
+        if (enabled && enabledModelCount > 0 && analysisText.isBlank() && !autoAnalysisAttempted) {
+            autoAnalysisAttempted = true
+            runAnalysisNow()
         }
     }
 
@@ -109,7 +120,10 @@ fun AiAnalysisScreen(onBack: () -> Unit) {
             "smart_consumption_analysis", android.content.Context.MODE_PRIVATE
         )
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-            refreshResult()
+            refreshState()
+            enabled = AiAnalysisPrefs.isEnabled(context)
+            dailyTime = AiAnalysisPrefs.dailyTime(context)
+            outputChars = AiAnalysisPrefs.maxOutputChars(context).toString()
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -159,17 +173,20 @@ fun AiAnalysisScreen(onBack: () -> Unit) {
                         enabled = !isAnalyzing,
                         onCheckedChange = { turnOn ->
                             if (turnOn) {
-                                val configError = saveConfiguration(requireApiKey = true)
-                                if (configError != null) {
-                                    message = configError
-                                } else {
-                                    enabled = true
-                                    AiAnalysisPrefs.setEnabled(context, true)
-                                    AiAnalysisScheduler.reschedule(context)
-                                    if (AiAnalysisPrefs.result(context).isBlank()) {
-                                        runAnalysisNow()
-                                    } else {
-                                        message = "已有分析结果，将按每日时间更新。"
+                                val configError = saveSettings()
+                                when {
+                                    configError != null -> message = configError
+                                    AiAnalysisPrefs.enabledCandidates(context).isEmpty() ->
+                                        message = "请先进入模型配置，添加并启用至少一个含 API Key 的提供商和模型。"
+                                    else -> {
+                                        enabled = true
+                                        AiAnalysisPrefs.setEnabled(context, true)
+                                        AiAnalysisScheduler.reschedule(context)
+                                        if (AiAnalysisPrefs.result(context).isBlank()) {
+                                            runAnalysisNow()
+                                        } else {
+                                            message = "已有分析结果，将按每日时间更新。"
+                                        }
                                     }
                                 }
                             } else {
@@ -183,32 +200,15 @@ fun AiAnalysisScreen(onBack: () -> Unit) {
                 }
             }
 
-            Text("AI 模型配置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("API Key") },
-                placeholder = { Text("填写你自己的模型服务 API Key") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation()
+            OutlinedButton(onClick = onOpenModelConfig, modifier = Modifier.fillMaxWidth()) {
+                Text("模型配置…（提供商、模型组与查询顺序）")
+            }
+            Text(
+                "当前可用于查询的已启用模型：$enabledModelCount 个",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            OutlinedTextField(
-                value = baseUrl,
-                onValueChange = { baseUrl = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Base URL") },
-                placeholder = { Text(AiAnalysisPrefs.DEFAULT_BASE_URL) },
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("模型名称") },
-                placeholder = { Text(AiAnalysisPrefs.DEFAULT_MODEL) },
-                singleLine = true
-            )
+
             OutlinedTextField(
                 value = dailyTime,
                 onValueChange = { dailyTime = it.take(5) },
@@ -218,36 +218,43 @@ fun AiAnalysisScreen(onBack: () -> Unit) {
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
             )
-            Text(
-                "采用 wallpaper_app 同类的 OpenAI 兼容接口：Base URL 通常填写到 /v1，例如 https://api.openai.com/v1。API Key 保存在本机应用私有设置中。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            OutlinedTextField(
+                value = outputChars,
+                onValueChange = { text -> outputChars = text.filter { it.isDigit() }.take(4) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("最大输出字数（${AiAnalysisPrefs.MIN_OUTPUT_CHARS}–${AiAnalysisPrefs.MAX_OUTPUT_CHARS}）") },
+                supportingText = { Text("模型会收到该字数要求，保存结果时也会按上限截断。") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
-            OutlinedButton(
+            Button(
                 onClick = {
-                    val configError = saveConfiguration(requireApiKey = enabled)
-                    if (configError != null) {
-                        message = configError
+                    val error = saveSettings()
+                    if (error != null) {
+                        message = error
                     } else {
                         if (enabled) {
                             AiAnalysisScheduler.reschedule(context)
                             if (AiAnalysisPrefs.result(context).isBlank()) runAnalysisNow()
                         }
-                        message = "AI 配置与定时时间已保存。"
+                        message = "定时时间和输出字数已保存。"
                     }
                 },
                 enabled = !isAnalyzing,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("保存模型配置和定时时间") }
+            ) { Text("保存设置") }
 
             Text(
-                "每次分析都是独立的新对话，只发送最近 30 天最多 120 笔账单与当前攒钱目标；包含日期、金额、类目、标签和备注。分析请求会发送到你配置的 AI 服务商，请确认其隐私政策与费用。回复最多保存 500 字；后台任务需要联网，系统省电策略可能使执行稍有延迟。",
+                "每次分析都是独立的新对话；只发送最近 30 天最多 120 笔账单与攒钱目标，包含日期、金额、类目、标签和备注。系统按模型组顺序尝试已启用模型，首个有效回复即停止。账单会发送到你配置的 AI 服务商，请确认其隐私政策与费用。后台执行需要联网，系统省电策略可能使时间稍有延迟。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             OutlinedButton(
-                onClick = { runAnalysisNow() },
+                onClick = {
+                    val error = saveSettings()
+                    if (error != null) message = error else runAnalysisNow()
+                },
                 enabled = enabled && !isAnalyzing,
                 modifier = Modifier.fillMaxWidth()
             ) { Text(if (isAnalyzing) "正在分析…" else "立即分析") }

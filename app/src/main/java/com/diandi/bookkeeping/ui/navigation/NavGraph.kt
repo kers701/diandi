@@ -9,6 +9,8 @@ sealed class Screen(val route: String) {
     data object Charts : Screen("charts")
     data object Goals : Screen("goals")
     data object AiAnalysis : Screen("ai_analysis")
+    data object AiProviders : Screen("ai_providers")
+    data object AiModelGroup : Screen("ai_model_group")
     data object Correction : Screen("correction")
     data object About : Screen("about")
     data object CategoryEdit : Screen("category_edit")

@@ -167,7 +167,19 @@ fun DiandiNav(
             GoalsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
         composable(Screen.AiAnalysis.route) {
-            AiAnalysisScreen(onBack = { navController.popBackStack() })
+            AiAnalysisScreen(
+                onBack = { navController.popBackStack() },
+                onOpenModelConfig = { navController.navigate(Screen.AiProviders.route) }
+            )
+        }
+        composable(Screen.AiProviders.route) {
+            AiProvidersScreen(
+                onBack = { navController.popBackStack() },
+                onOpenModelGroup = { navController.navigate(Screen.AiModelGroup.route) }
+            )
+        }
+        composable(Screen.AiModelGroup.route) {
+            AiModelGroupScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.Correction.route) {
             CorrectionScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
