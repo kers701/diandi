@@ -447,62 +447,77 @@ fun TransactionItem(
     val isExpense = tx.type == "EXPENSE"
     val amountColor = if (isExpense) Color(0xFFD32F2F) else Color(0xFF388E3C)
     val sign = if (isExpense) "-" else "+"
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    val density = LocalDensity.current
-    // 两个按钮 + 间距，用 dp 转 px，避免高分屏只露出半个图标
-    val actionWidthPx = with(density) { 156.dp.toPx() }
+    var revealed by remember { mutableStateOf(false) }
 
-    Box(modifier = Modifier.fillMaxWidth()) {
-        // 左滑露出的操作区：固定宽度贴右，保证完整露出编辑+删除
-        Row(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .width(156.dp)
-                .fillMaxHeight()
-                .padding(end = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically
+    if (revealed) {
+        // 左滑后整行展示三个完整操作，不依赖分辨率半露
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            elevation = CardDefaults.cardElevation(2.dp)
         ) {
-            FilledIconButton(
-                onClick = {
-                    offsetX = 0f
-                    onEdit()
-                },
-                modifier = Modifier.size(48.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Edit, contentDescription = "编辑")
-            }
-            FilledIconButton(
-                onClick = {
-                    offsetX = 0f
-                    onDelete()
-                },
-                modifier = Modifier.size(48.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.error
-                )
-            ) {
-                Icon(Icons.Default.Delete, contentDescription = "删除")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    FilledIconButton(
+                        onClick = { revealed = false },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "退出")
+                    }
+                    Text("退出", style = MaterialTheme.typography.labelSmall)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    FilledIconButton(
+                        onClick = {
+                            revealed = false
+                            onEdit()
+                        },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = "编辑")
+                    }
+                    Text("编辑", style = MaterialTheme.typography.labelSmall)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    FilledIconButton(
+                        onClick = {
+                            revealed = false
+                            onDelete()
+                        },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "删除")
+                    }
+                    Text("删除", style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
-
+    } else {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset { IntOffset(offsetX.roundToInt(), 0) }
                 .pointerInput(tx.id) {
                     detectHorizontalDragGestures(
-                        onDragEnd = {
-                            offsetX = if (offsetX < -actionWidthPx / 2f) -actionWidthPx else 0f
-                        },
-                        onDragCancel = {
-                            offsetX = if (offsetX < -actionWidthPx / 2f) -actionWidthPx else 0f
-                        },
+                        onDragEnd = { },
                         onHorizontalDrag = { _, dragAmount ->
-                            offsetX = (offsetX + dragAmount).coerceIn(-actionWidthPx, 0f)
+                            // 左滑超过一定像素即进入操作态
+                            if (dragAmount < -12f) {
+                                revealed = true
+                            }
                         }
                     )
                 },
