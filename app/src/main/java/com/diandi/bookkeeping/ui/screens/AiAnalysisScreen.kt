@@ -72,6 +72,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     var isAnalyzing by remember { mutableStateOf(AiAnalysisPrefs.isAnalyzing(context)) }
     var autoAnalysisAttempted by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var showModelConfigAction by remember { mutableStateOf(false) }
 
     fun refreshState() {
         analysisText = AiAnalysisPrefs.result(context)
@@ -184,11 +185,13 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text("智能消费分析", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "开启后按设定时间分析；没有历史结果时会立即分析一次。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (enabled) {
+                            Text(
+                                "开启后按设定时间分析；没有历史结果时会立即分析一次。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     Switch(
                         checked = enabled,
@@ -197,9 +200,12 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                                 val configError = saveSettings()
                                 when {
                                     configError != null -> message = configError
-                                    AiAnalysisPrefs.enabledCandidates(context).isEmpty() ->
+                                    AiAnalysisPrefs.enabledCandidates(context).isEmpty() -> {
+                                        showModelConfigAction = true
                                         message = "请先进入模型配置，添加并启用至少一个含 API Key 的提供商和模型。"
+                                    }
                                     else -> {
+                                        showModelConfigAction = false
                                         enabled = true
                                         AiAnalysisPrefs.setEnabled(context, true)
                                         AiAnalysisScheduler.reschedule(context)
@@ -214,102 +220,126 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                                 enabled = false
                                 AiAnalysisPrefs.setEnabled(context, false)
                                 AiAnalysisScheduler.cancel(context)
-                                message = "智能消费分析已关闭，后续不再自动发送账单数据。"
+                                message = null
+                                showModelConfigAction = false
                             }
                         }
                     )
                 }
             }
 
-            OutlinedButton(onClick = onOpenModelConfig, modifier = Modifier.fillMaxWidth()) {
-                Text("模型配置…（提供商、模型组与查询顺序）")
-            }
-            Text(
-                "当前可用于查询的已启用模型：$enabledModelCount 个",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            OutlinedTextField(
-                value = dailyTime,
-                onValueChange = { dailyTime = it.take(5) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("每日分析时间（24 小时制 HH:mm）") },
-                placeholder = { Text(AiAnalysisPrefs.DEFAULT_DAILY_TIME) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
-            )
-            OutlinedTextField(
-                value = outputChars,
-                onValueChange = { text -> outputChars = text.filter { it.isDigit() }.take(4) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("最大输出字数（${AiAnalysisPrefs.MIN_OUTPUT_CHARS}–${AiAnalysisPrefs.MAX_OUTPUT_CHARS}）") },
-                supportingText = { Text("模型会收到该字数要求，保存结果时也会按上限截断。") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-            )
-            Button(
-                onClick = {
-                    val error = saveSettings()
-                    if (error != null) {
-                        message = error
-                    } else {
-                        if (enabled) {
-                            AiAnalysisScheduler.reschedule(context)
-                            if (AiAnalysisPrefs.result(context).isBlank()) runAnalysisNow()
-                        }
-                        message = "定时时间和输出字数已保存。"
-                    }
-                },
-                enabled = !isAnalyzing,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("保存设置") }
-
-            Text(
-                "每次分析都是独立的新对话；只发送最近 30 天最多 120 笔账单与攒钱目标，包含日期、金额、类目、标签和备注。系统按模型组顺序尝试已启用模型，首个有效回复即停止。账单会发送到你配置的 AI 服务商，请确认其隐私政策与费用。后台执行需要联网，系统省电策略可能使时间稍有延迟。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            OutlinedButton(
-                onClick = {
-                    val error = saveSettings()
-                    if (error != null) message = error else runAnalysisNow()
-                },
-                enabled = enabled && !isAnalyzing,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(if (isAnalyzing) "正在分析…" else "立即分析") }
-            if (isAnalyzing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-
-            if (lastSuccessAt > 0L) {
-                val formatted = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-                    .withZone(ZoneId.systemDefault())
-                    .format(Instant.ofEpochMilli(lastSuccessAt))
-                Text("最近成功分析：$formatted", style = MaterialTheme.typography.bodySmall)
-            }
-            if (lastError.isNotBlank()) {
-                Text(lastError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            }
-            if (analysisText.isNotBlank()) {
-                Text("最近分析结果", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Card {
-                    Text(
-                        analysisText,
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+            if (enabled) {
+                OutlinedButton(onClick = onOpenModelConfig, modifier = Modifier.fillMaxWidth()) {
+                    Text("模型配置…（提供商、模型组与查询顺序）")
                 }
+                Text(
+                    "当前可用于查询的已启用模型：$enabledModelCount 个",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = dailyTime,
+                    onValueChange = { dailyTime = it.take(5) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("每日分析时间（24 小时制 HH:mm）") },
+                    placeholder = { Text(AiAnalysisPrefs.DEFAULT_DAILY_TIME) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+                )
+                OutlinedTextField(
+                    value = outputChars,
+                    onValueChange = { text -> outputChars = text.filter { it.isDigit() }.take(4) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("最大输出字数（${AiAnalysisPrefs.MIN_OUTPUT_CHARS}–${AiAnalysisPrefs.MAX_OUTPUT_CHARS}）") },
+                    supportingText = { Text("模型会收到该字数要求，保存结果时也会按上限截断。") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                Button(
+                    onClick = {
+                        val error = saveSettings()
+                        if (error != null) {
+                            message = error
+                        } else {
+                            if (enabled) {
+                                AiAnalysisScheduler.reschedule(context)
+                                if (AiAnalysisPrefs.result(context).isBlank()) runAnalysisNow()
+                            }
+                            message = "定时时间和输出字数已保存。"
+                        }
+                    },
+                    enabled = !isAnalyzing,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("保存设置") }
+
+                Text(
+                    "每次分析都是独立的新对话；只发送最近 30 天最多 120 笔账单与攒钱目标，包含日期、金额、类目、标签和备注。系统按模型组顺序尝试已启用模型，首个有效回复即停止。账单会发送到你配置的 AI 服务商，请确认其隐私政策与费用。后台执行需要联网，系统省电策略可能使时间稍有延迟。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedButton(
+                    onClick = {
+                        val error = saveSettings()
+                        if (error != null) message = error else runAnalysisNow()
+                    },
+                    enabled = enabled && !isAnalyzing,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (isAnalyzing) "正在分析…" else "立即分析") }
+                if (isAnalyzing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+
+                if (lastSuccessAt > 0L) {
+                    val formatted = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                        .withZone(ZoneId.systemDefault())
+                        .format(Instant.ofEpochMilli(lastSuccessAt))
+                    Text("最近成功分析：$formatted", style = MaterialTheme.typography.bodySmall)
+                }
+                if (lastError.isNotBlank()) {
+                    Text(lastError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                if (analysisText.isNotBlank()) {
+                    Text("最近分析结果", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Card {
+                        Text(
+                            analysisText,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
             }
-            Spacer(Modifier.height(12.dp))
         }
     }
 
     message?.let { text ->
         AlertDialog(
-            onDismissRequest = { message = null },
+            onDismissRequest = {
+                message = null
+                showModelConfigAction = false
+            },
             title = { Text("AI 消费分析") },
             text = { Text(text) },
-            confirmButton = { TextButton(onClick = { message = null }) { Text("确定") } }
+            confirmButton = {
+                TextButton(onClick = {
+                    message = null
+                    if (showModelConfigAction) onOpenModelConfig()
+                    showModelConfigAction = false
+                }) {
+                    Text(if (showModelConfigAction) "去配置模型" else "确定")
+                }
+            },
+            dismissButton = {
+                if (showModelConfigAction) {
+                    TextButton(onClick = {
+                        message = null
+                        showModelConfigAction = false
+                    }) {
+                        Text("取消")
+                    }
+                }
+            }
         )
     }
 }

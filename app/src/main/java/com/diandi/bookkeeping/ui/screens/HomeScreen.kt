@@ -101,6 +101,7 @@ fun HomeScreen(
     var smartAnalysisError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
     var smartAnalysisUpdatedAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
     var smartAnalysisRunning by remember { mutableStateOf(AiAnalysisPrefs.isAnalyzing(context)) }
+    var showCopyAnalysisConfirm by remember { mutableStateOf(false) }
     val currentMonth = YearMonth.now()
     val homeCategoryStatsFlow = remember(viewModel, currentMonth) {
         viewModel.getCategoryDistribution("EXPENSE", currentMonth.year, currentMonth.monthValue, null)
@@ -424,15 +425,7 @@ fun HomeScreen(
                                     smartAnalysisResult,
                                     modifier = Modifier.pointerInput(smartAnalysisResult) {
                                         detectTapGestures(onDoubleTap = {
-                                            val clipboard = context.getSystemService(
-                                                android.content.Context.CLIPBOARD_SERVICE
-                                            ) as? ClipboardManager
-                                            if (clipboard != null) {
-                                                clipboard.setPrimaryClip(
-                                                    ClipData.newPlainText("AI 消费分析结果", smartAnalysisResult)
-                                                )
-                                                Toast.makeText(context, "AI 分析结果已复制", Toast.LENGTH_SHORT).show()
-                                            }
+                                            showCopyAnalysisConfirm = true
                                         })
                                     },
                                     style = MaterialTheme.typography.bodyMedium
@@ -636,6 +629,35 @@ fun HomeScreen(
             dismissButton = {
                 TextButton(onClick = { showCategoryEditConfirm = false }) {
                     Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showCopyAnalysisConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCopyAnalysisConfirm = false },
+            title = { Text("复制分析结果") },
+            text = { Text("是否复制到剪切板？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    if (clipboard != null) {
+                        clipboard.setPrimaryClip(
+                            ClipData.newPlainText("AI 消费分析结果", smartAnalysisResult)
+                        )
+                        Toast.makeText(context, "AI 分析结果已复制", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "无法访问剪切板", Toast.LENGTH_SHORT).show()
+                    }
+                    showCopyAnalysisConfirm = false
+                }) {
+                    Text("是")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCopyAnalysisConfirm = false }) {
+                    Text("否")
                 }
             }
         )
