@@ -29,6 +29,7 @@ import com.diandi.bookkeeping.viewmodel.MainViewModel
 import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.AppUpdateChecker
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
@@ -447,15 +448,19 @@ fun TransactionItem(
     val amountColor = if (isExpense) Color(0xFFD32F2F) else Color(0xFF388E3C)
     val sign = if (isExpense) "-" else "+"
     var offsetX by remember { mutableFloatStateOf(0f) }
-    val actionWidth = 160f
+    val density = LocalDensity.current
+    // 两个按钮 + 间距，用 dp 转 px，避免高分屏只露出半个图标
+    val actionWidthPx = with(density) { 156.dp.toPx() }
 
     Box(modifier = Modifier.fillMaxWidth()) {
-        // 左滑露出的操作区
+        // 左滑露出的操作区：固定宽度贴右，保证完整露出编辑+删除
         Row(
             modifier = Modifier
-                .matchParentSize()
-                .padding(end = 4.dp),
-            horizontalArrangement = Arrangement.End,
+                .align(Alignment.CenterEnd)
+                .width(156.dp)
+                .fillMaxHeight()
+                .padding(end = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
             verticalAlignment = Alignment.CenterVertically
         ) {
             FilledIconButton(
@@ -463,18 +468,19 @@ fun TransactionItem(
                     offsetX = 0f
                     onEdit()
                 },
+                modifier = Modifier.size(48.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             ) {
                 Icon(Icons.Default.Edit, contentDescription = "编辑")
             }
-            Spacer(Modifier.width(8.dp))
             FilledIconButton(
                 onClick = {
                     offsetX = 0f
                     onDelete()
                 },
+                modifier = Modifier.size(48.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.error
                 )
@@ -490,13 +496,13 @@ fun TransactionItem(
                 .pointerInput(tx.id) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
-                            offsetX = if (offsetX < -actionWidth / 2) -actionWidth else 0f
+                            offsetX = if (offsetX < -actionWidthPx / 2f) -actionWidthPx else 0f
                         },
                         onDragCancel = {
-                            offsetX = if (offsetX < -actionWidth / 2) -actionWidth else 0f
+                            offsetX = if (offsetX < -actionWidthPx / 2f) -actionWidthPx else 0f
                         },
                         onHorizontalDrag = { _, dragAmount ->
-                            offsetX = (offsetX + dragAmount).coerceIn(-actionWidth, 0f)
+                            offsetX = (offsetX + dragAmount).coerceIn(-actionWidthPx, 0f)
                         }
                     )
                 },
