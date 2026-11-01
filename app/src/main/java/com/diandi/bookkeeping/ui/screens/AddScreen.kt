@@ -15,15 +15,19 @@ import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddScreen(
     viewModel: MainViewModel,
     initialType: String? = null,
+    editId: Long? = null,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    var ready by remember { mutableStateOf(editId == null) }
     var type by remember { mutableStateOf(initialType ?: "EXPENSE") }
     var amountText by remember { mutableStateOf("") }
     var category by remember {
@@ -35,14 +39,58 @@ fun AddScreen(
     var tags by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(LocalDate.now()) }
+    var createdAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var showDatePicker by remember { mutableStateOf(false) }
 
+    LaunchedEffect(editId) {
+        if (editId != null) {
+            val tx = withContext(Dispatchers.IO) {
+                // load via viewModel suspend
+                viewModel.loadTransaction(editId)
+            }
+            if (tx != null) {
+                type = tx.type
+                amountText = if (tx.amount == tx.amount.toLong().toDouble()) {
+                    tx.amount.toLong().toString()
+                } else {
+                    "%.2f".format(tx.amount)
+                }
+                category = tx.category
+                tags = tx.tags
+                note = tx.note
+                date = tx.toLocalDate()
+                createdAt = tx.createdAt
+            }
+            ready = true
+        }
+    }
+
     val categories = Categories.getByType(context, type)
+    // 若编辑时类目已不在列表，仍显示当前值
+    val displayCategories = remember(categories, category) {
+        if (category.isNotBlank() && category !in categories) categories + category else categories
+    }
+
+    if (!ready) {
+        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (type == "EXPENSE") "添加支出" else "添加收入") },
+                title = {
+                    Text(
+                        when {
+                            editId != null && type == "EXPENSE" -> "编辑支出"
+                            editId != null -> "编辑收入"
+                            type == "EXPENSE" -> "添加支出"
+                            else -> "添加收入"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
@@ -59,15 +107,16 @@ fun AddScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 类型切换
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TypeChip("支出", type == "EXPENSE", Color(0xFFD32F2F)) {
                     type = "EXPENSE"
-                    category = Categories.expense(context).first()
+                    val list = Categories.expense(context)
+                    if (category !in list) category = list.first()
                 }
                 TypeChip("收入", type == "INCOME", Color(0xFF388E3C)) {
                     type = "INCOME"
-                    category = Categories.income(context).first()
+                    val list = Categories.income(context)
+                    if (category !in list) category = list.first()
                 }
             }
 
@@ -80,9 +129,8 @@ fun AddScreen(
                 prefix = { Text("¥ ") }
             )
 
-            // 大类选择
             Text("选择大类", style = MaterialTheme.typography.titleSmall)
-            categories.chunked(3).forEach { row ->
+            displayCategories.chunked(3).forEach { row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -95,7 +143,6 @@ fun AddScreen(
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    // 补齐空位
                     repeat(3 - row.size) {
                         Spacer(Modifier.weight(1f))
                     }
@@ -122,7 +169,9 @@ fun AddScreen(
                 onClick = { showDatePicker = true },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("日期: ${date.year}-${date.monthValue.toString().padStart(2, '0')}-${date.dayOfMonth.toString().padStart(2, '0')}")
+                Text(
+                    "日期: ${date.year}-${date.monthValue.toString().padStart(2, '0')}-${date.dayOfMonth.toString().padStart(2, '0')}"
+                )
             }
 
             Spacer(Modifier.height(8.dp))
@@ -131,21 +180,34 @@ fun AddScreen(
                 onClick = {
                     val amount = amountText.toDoubleOrNull()
                     if (amount != null && amount > 0) {
-                        viewModel.addTransaction(
-                            amount = amount,
-                            type = type,
-                            category = category,
-                            tags = tags,
-                            note = note,
-                            date = date
-                        )
+                        if (editId != null) {
+                            viewModel.updateTransaction(
+                                id = editId,
+                                amount = amount,
+                                type = type,
+                                category = category,
+                                tags = tags,
+                                note = note,
+                                date = date,
+                                createdAt = createdAt
+                            )
+                        } else {
+                            viewModel.addTransaction(
+                                amount = amount,
+                                type = type,
+                                category = category,
+                                tags = tags,
+                                note = note,
+                                date = date
+                            )
+                        }
                         onBack()
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = amountText.toDoubleOrNull()?.let { it > 0 } == true
             ) {
-                Text("保存")
+                Text(if (editId != null) "保存修改" else "保存")
             }
         }
     }
@@ -158,8 +220,10 @@ fun AddScreen(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let {
-                        date = LocalDate.ofEpochDay(it / (24 * 60 * 60 * 1000))
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        date = java.time.Instant.ofEpochMilli(millis)
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalDate()
                     }
                     showDatePicker = false
                 }) { Text("确定") }

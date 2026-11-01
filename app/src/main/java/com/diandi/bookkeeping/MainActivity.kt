@@ -132,7 +132,8 @@ fun DiandiNav(
                 onGoalsClick = { navController.navigate(Screen.Goals.route) },
                 onCorrectionClick = { navController.navigate(Screen.Correction.route) },
                 onAboutClick = { navController.navigate(Screen.About.route) },
-                onCategoryEditClick = { navController.navigate(Screen.CategoryEdit.route) }
+                onCategoryEditClick = { navController.navigate(Screen.CategoryEdit.route) },
+                onEditClick = { id -> navController.navigate(Screen.Edit.create(id)) }
             )
         }
         composable(Screen.Add.route) {
@@ -143,6 +144,19 @@ fun DiandiNav(
                     onPendingConsumed()
                     navController.popBackStack()
                 }
+            )
+        }
+        composable(
+            route = Screen.Edit.route,
+            arguments = listOf(androidx.navigation.navArgument("id") {
+                type = androidx.navigation.NavType.LongType
+            })
+        ) { entry ->
+            val id = entry.arguments?.getLong("id")
+            AddScreen(
+                viewModel = viewModel,
+                editId = id,
+                onBack = { navController.popBackStack() }
             )
         }
         composable(Screen.Charts.route) {

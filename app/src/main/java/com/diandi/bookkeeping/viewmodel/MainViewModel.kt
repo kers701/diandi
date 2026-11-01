@@ -115,9 +115,42 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         }
     }
 
+    fun updateTransaction(
+        id: Long,
+        amount: Double,
+        type: String,
+        category: String,
+        tags: String,
+        note: String,
+        date: LocalDate,
+        createdAt: Long
+    ) {
+        viewModelScope.launch {
+            repo.updateTransaction(
+                Transaction(
+                    id = id,
+                    amount = amount,
+                    type = type,
+                    category = category,
+                    tags = tags.trim(),
+                    note = note,
+                    year = date.year,
+                    month = date.monthValue,
+                    day = date.dayOfMonth,
+                    createdAt = createdAt
+                )
+            )
+        }
+    }
+
     fun deleteTransaction(tx: Transaction) {
         viewModelScope.launch { repo.deleteTransaction(tx) }
     }
+
+    suspend fun isCategoryInUse(category: String): Boolean =
+        repo.countByCategory(category) > 0
+
+    suspend fun loadTransaction(id: Long) = repo.getTransaction(id)
 
     fun addGoal(title: String, target: Double, deadline: String = "") {
         viewModelScope.launch {

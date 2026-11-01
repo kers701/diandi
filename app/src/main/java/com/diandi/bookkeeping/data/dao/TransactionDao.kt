@@ -31,6 +31,12 @@ interface TransactionDao {
         categoriesEmpty: Int
     ): Flow<List<Transaction>>
 
+    @Query("SELECT COUNT(*) FROM transactions WHERE category = :category")
+    suspend fun countByCategory(category: String): Int
+
+    @Query("SELECT * FROM transactions WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): Transaction?
+
     @Insert
     suspend fun insert(transaction: Transaction): Long
 

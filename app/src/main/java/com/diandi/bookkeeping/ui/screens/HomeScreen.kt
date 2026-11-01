@@ -1,7 +1,9 @@
-import android.widget.Toast
 package com.diandi.bookkeeping.ui.screens
 
+import android.widget.Toast
+import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,9 +15,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.ui.components.BalanceCard
@@ -42,7 +46,8 @@ fun HomeScreen(
     onGoalsClick: () -> Unit,
     onCorrectionClick: () -> Unit,
     onAboutClick: () -> Unit = {},
-    onCategoryEditClick: () -> Unit = {}
+    onCategoryEditClick: () -> Unit = {},
+    onEditClick: (Long) -> Unit = {}
 ) {
     val transactions by viewModel.transactions.collectAsState()
     val balance by viewModel.balance.collectAsState()
@@ -287,6 +292,7 @@ fun HomeScreen(
                     items(transactions, key = { it.id }) { tx ->
                         TransactionItem(
                             tx = tx,
+                            onEdit = { onEditClick(tx.id) },
                             onDelete = { transactionToDelete = tx }
                         )
                     }
@@ -432,51 +438,108 @@ private fun balanceAccentColor(balance: Double): Color {
 }
 
 @Composable
-fun TransactionItem(tx: Transaction, onDelete: () -> Unit) {
+fun TransactionItem(
+    tx: Transaction,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
     val isExpense = tx.type == "EXPENSE"
     val amountColor = if (isExpense) Color(0xFFD32F2F) else Color(0xFF388E3C)
     val sign = if (isExpense) "-" else "+"
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    val actionWidth = 160f
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(2.dp)
-    ) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // 左滑露出的操作区
         Row(
             modifier = Modifier
-                .padding(12.dp)
-                .fillMaxWidth(),
+                .matchParentSize()
+                .padding(end = 4.dp),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    tx.category,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp
+            FilledIconButton(
+                onClick = {
+                    offsetX = 0f
+                    onEdit()
+                },
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
                 )
-                if (tx.tags.isNotBlank()) {
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = "编辑")
+            }
+            Spacer(Modifier.width(8.dp))
+            FilledIconButton(
+                onClick = {
+                    offsetX = 0f
+                    onDelete()
+                },
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = "删除")
+            }
+        }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(offsetX.roundToInt(), 0) }
+                .pointerInput(tx.id) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            offsetX = if (offsetX < -actionWidth / 2) -actionWidth else 0f
+                        },
+                        onDragCancel = {
+                            offsetX = if (offsetX < -actionWidth / 2) -actionWidth else 0f
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            offsetX = (offsetX + dragAmount).coerceIn(-actionWidth, 0f)
+                        }
+                    )
+                },
+            elevation = CardDefaults.cardElevation(2.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(12.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "标签: ${tx.tags}",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary
+                        tx.category,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 16.sp
+                    )
+                    if (tx.tags.isNotBlank()) {
+                        Text(
+                            "标签: ${tx.tags}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (tx.note.isNotBlank()) {
+                        Text(
+                            tx.note,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        "${tx.year}-${tx.month.toString().padStart(2, '0')}-${tx.day.toString().padStart(2, '0')}",
+                        fontSize = 11.sp,
+                        color = Color.Gray
                     )
                 }
-                if (tx.note.isNotBlank()) {
-                    Text(tx.note, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
                 Text(
-                    "${tx.year}-${tx.month.toString().padStart(2, '0')}-${tx.day.toString().padStart(2, '0')}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    "$sign${"%.2f".format(tx.amount)}",
+                    color = amountColor,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
                 )
-            }
-            Text(
-                "$sign${formatMoney(tx.amount)}",
-                color = amountColor,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
-            )
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "删除", tint = Color.Gray)
             }
         }
     }

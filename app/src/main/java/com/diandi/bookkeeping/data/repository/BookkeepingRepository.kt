@@ -20,6 +20,8 @@ class BookkeepingRepository(private val dao: TransactionDao) {
         categoriesEmpty: Int = 1
     ) = dao.getFiltered(startDate, endDate, type, tagQuery, categories, categoriesEmpty)
 
+    suspend fun countByCategory(category: String) = dao.countByCategory(category)
+    suspend fun getTransaction(id: Long) = dao.getById(id)
     suspend fun addTransaction(tx: Transaction) = dao.insert(tx)
     suspend fun updateTransaction(tx: Transaction) = dao.update(tx)
     suspend fun deleteTransaction(tx: Transaction) = dao.delete(tx)

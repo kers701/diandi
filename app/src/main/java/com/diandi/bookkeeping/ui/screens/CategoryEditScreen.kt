@@ -1,6 +1,7 @@
 package com.diandi.bookkeeping.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,30 +12,37 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.diandi.bookkeeping.data.db.AppDatabase
 import com.diandi.bookkeeping.util.AppPrefs
 import com.diandi.bookkeeping.util.Categories
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryEditScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    var tab by remember { mutableIntStateOf(0) } // 0 expense 1 income
+    var tab by remember { mutableIntStateOf(0) }
     var expenseList by remember { mutableStateOf(Categories.expense(context)) }
     var incomeList by remember { mutableStateOf(Categories.income(context)) }
     var newName by remember { mutableStateOf("") }
     var showRestoreConfirm by remember { mutableStateOf(false) }
+    var locked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var lockHint by remember { mutableStateOf<String?>(null) }
 
     val currentList = if (tab == 0) expenseList else incomeList
 
-    fun persist() {
-        if (tab == 0) {
-            AppPrefs.setExpenseCategories(context, expenseList)
-        } else {
-            AppPrefs.setIncomeCategories(context, incomeList)
+    LaunchedEffect(expenseList, incomeList) {
+        val all = (expenseList + incomeList).distinct()
+        val used = withContext(Dispatchers.IO) {
+            val dao = AppDatabase.getInstance(context).transactionDao()
+            all.filter { dao.countByCategory(it) > 0 }.toSet()
         }
+        locked = used
     }
 
     Scaffold(
@@ -61,7 +69,7 @@ fun CategoryEditScreen(onBack: () -> Unit) {
                 .padding(16.dp)
         ) {
             Text(
-                "点首页标题「点滴」7 次可进入本页。支出与收入类目分开维护。",
+                "点首页标题「点滴」7 次可进入本页。有关联账单的类目不可删除。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -117,15 +125,29 @@ fun CategoryEditScreen(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 items(currentList, key = { it }) { name ->
+                    val isLocked = name in locked
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(name, Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                        Column(Modifier.weight(1f)) {
+                            Text(name, fontWeight = FontWeight.Medium)
+                            if (isLocked) {
+                                Text(
+                                    "有关联账单，不可删除",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         IconButton(
                             onClick = {
+                                if (isLocked) {
+                                    lockHint = name
+                                    return@IconButton
+                                }
                                 if (currentList.size <= 1) {
                                     Toast.makeText(context, "至少保留一个类目", Toast.LENGTH_SHORT).show()
                                     return@IconButton
@@ -139,7 +161,13 @@ fun CategoryEditScreen(onBack: () -> Unit) {
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.Delete, "删除", tint = MaterialTheme.colorScheme.error)
+                            Icon(
+                                Icons.Default.Delete,
+                                "删除",
+                                modifier = Modifier.alpha(if (isLocked) 0.35f else 1f),
+                                tint = if (isLocked) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                     HorizontalDivider()
@@ -148,14 +176,27 @@ fun CategoryEditScreen(onBack: () -> Unit) {
         }
     }
 
+    lockHint?.let {
+        AlertDialog(
+            onDismissRequest = { lockHint = null },
+            title = { Text("无法删除类目") },
+            text = {
+                Text("该类目存在关联账单，为保护历史记账数据，暂不允许删除。你可以编辑账单。")
+            },
+            confirmButton = {
+                TextButton(onClick = { lockHint = null }) { Text("知道了") }
+            }
+        )
+    }
+
     if (showRestoreConfirm) {
         AlertDialog(
             onDismissRequest = { showRestoreConfirm = false },
             title = { Text("还原预设类目？") },
             text = {
                 Text(
-                    if (tab == 0) "将支出类目恢复为应用内置列表，当前自定义支出类目会被覆盖。"
-                    else "将收入类目恢复为应用内置列表，当前自定义收入类目会被覆盖。"
+                    if (tab == 0) "将支出类目恢复为应用内置列表。仍有关联账单的名称若被移除，不影响已有账单数据。"
+                    else "将收入类目恢复为应用内置列表。仍有关联账单的名称若被移除，不影响已有账单数据。"
                 )
             },
             confirmButton = {
