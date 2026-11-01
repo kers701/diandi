@@ -541,26 +541,27 @@ fun TransactionItem(
                         Text(
                             tx.category,
                             fontWeight = FontWeight.Medium,
-                            fontSize = 16.sp
+                            fontSize = 16.sp,
+                            color = amountColor
                         )
                         if (tx.tags.isNotBlank()) {
                             Text(
                                 "标签: ${tx.tags}",
                                 fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.secondary
                             )
                         }
                         if (tx.note.isNotBlank()) {
                             Text(
                                 tx.note,
                                 fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.tertiary
                             )
                         }
                         Text(
                             "${tx.year}-${tx.month.toString().padStart(2, '0')}-${tx.day.toString().padStart(2, '0')}",
                             fontSize = 11.sp,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Text(
