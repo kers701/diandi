@@ -49,18 +49,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
 import com.diandi.bookkeeping.data.ai.AiAnalysisThresholdCounter
 import com.diandi.bookkeeping.service.AiAnalysisScheduler
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.concurrent.TimeUnit
 
 @Suppress("DEPRECATION")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,6 +65,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
 
     var enabled by remember { mutableStateOf(AiAnalysisPrefs.isEnabled(context)) }
     var thresholdText by remember { mutableStateOf(initialCounterState.threshold.toString()) }
+    var thresholdValue by remember { mutableIntStateOf(initialCounterState.threshold) }
     var billCount by remember { mutableIntStateOf(initialCounterState.count) }
     var outputChars by remember { mutableStateOf(AiAnalysisPrefs.maxOutputChars(context).toString()) }
     var analysisText by remember { mutableStateOf(AiAnalysisPrefs.result(context)) }
@@ -80,7 +75,6 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     var lastError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
     var enabledModelCount by remember { mutableIntStateOf(AiAnalysisPrefs.enabledCandidates(context).size) }
     var isAnalyzing by remember { mutableStateOf(AiAnalysisPrefs.isAnalyzing(context)) }
-    var analysisQueueStatus by remember { mutableStateOf("正在读取分析队列状态…") }
     var autoAnalysisAttempted by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var showModelConfigAction by remember { mutableStateOf(false) }
@@ -94,6 +88,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
         enabledModelCount = AiAnalysisPrefs.enabledCandidates(context).size
         isAnalyzing = AiAnalysisPrefs.isAnalyzing(context)
         val counterState = AiAnalysisThresholdCounter.readState(context)
+        thresholdValue = counterState.threshold
         billCount = counterState.count
     }
 
@@ -110,6 +105,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                 try {
                     val counterState = AiAnalysisThresholdCounter.setThreshold(context, parsedThreshold)
                     thresholdText = counterState.threshold.toString()
+                    thresholdValue = counterState.threshold
                     billCount = counterState.count
                     outputChars = parsedChars.toString()
                     AiAnalysisPrefs.setMaxOutputChars(context, parsedChars)
@@ -140,35 +136,6 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
         }
     }
 
-    LaunchedEffect(enabled, context) {
-        if (!enabled) {
-            analysisQueueStatus = "未启用"
-            return@LaunchedEffect
-        }
-        while (true) {
-            analysisQueueStatus = withContext(Dispatchers.IO) {
-                runCatching {
-                    WorkManager.getInstance(context)
-                        .getWorkInfosForUniqueWork(AiAnalysisScheduler.IMMEDIATE_WORK_NAME)
-                        .get(10, TimeUnit.SECONDS)
-                }.fold(
-                    onSuccess = { workInfos ->
-                        when {
-                            workInfos.any { it.state == WorkInfo.State.RUNNING } -> "正在执行分析"
-                            workInfos.any { it.state == WorkInfo.State.ENQUEUED } -> "已排队，等待联网或系统执行"
-                            workInfos.any { it.state == WorkInfo.State.BLOCKED } -> "等待前序分析完成"
-                            workInfos.any { it.state == WorkInfo.State.FAILED } -> "最近任务执行失败"
-                            workInfos.any { it.state == WorkInfo.State.SUCCEEDED } -> "最近任务已完成"
-                            else -> "当前没有待执行的分析任务"
-                        }
-                    },
-                    onFailure = { error -> "状态读取失败：${error.message ?: "未知错误"}" }
-                )
-            }
-            delay(15_000)
-        }
-    }
-
     DisposableEffect(context) {
         val preferences = context.getSharedPreferences(
             "smart_consumption_analysis", android.content.Context.MODE_MULTI_PROCESS
@@ -183,6 +150,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                 val update = intent ?: return
                 if (update.action == AiAnalysisThresholdCounter.ACTION_STATE_CHANGED) {
                     val state = AiAnalysisThresholdCounter.readState(context)
+                    thresholdValue = state.threshold
                     billCount = state.count
                     return
                 }
@@ -358,7 +326,10 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                         .format(Instant.ofEpochMilli(lastSuccessAt))
                     Text("最近成功分析：$formatted", style = MaterialTheme.typography.bodySmall)
                 }
-                Text("分析任务队列：$analysisQueueStatus", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "触发进度：$billCount（计数）/$thresholdValue（阈值）",
+                    style = MaterialTheme.typography.bodySmall
+                )
                 if (lastTriggerAt > 0L) {
                     val formatted = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
                         .withZone(ZoneId.systemDefault())
