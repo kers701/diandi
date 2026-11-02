@@ -18,6 +18,8 @@ object AiAnalysisPrefs {
     private const val KEY_LAST_SUCCESS_AT = "last_success_at"
     private const val KEY_LAST_ERROR = "last_error"
     private const val KEY_ANALYZING = "analyzing"
+    private const val KEY_LAST_TRIGGER_AT = "last_trigger_at"
+    private const val KEY_LAST_TRIGGER_SOURCE = "last_trigger_source"
 
     const val ACTION_STATE_CHANGED = "com.diandi.bookkeeping.action.AI_ANALYSIS_STATE_CHANGED"
     const val EXTRA_ENABLED = "enabled"
@@ -25,6 +27,8 @@ object AiAnalysisPrefs {
     const val EXTRA_LAST_SUCCESS_AT = "last_success_at"
     const val EXTRA_LAST_ERROR = "last_error"
     const val EXTRA_ANALYZING = "analyzing"
+    const val EXTRA_LAST_TRIGGER_AT = "last_trigger_at"
+    const val EXTRA_LAST_TRIGGER_SOURCE = "last_trigger_source"
 
     const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
     const val DEFAULT_MODEL = "gpt-4o-mini"
@@ -187,6 +191,19 @@ object AiAnalysisPrefs {
     fun lastSuccessAt(context: Context): Long = prefs(context).getLong(KEY_LAST_SUCCESS_AT, 0L)
     fun lastError(context: Context): String = prefs(context).getString(KEY_LAST_ERROR, "").orEmpty()
     fun isAnalyzing(context: Context): Boolean = prefs(context).getBoolean(KEY_ANALYZING, false)
+    fun lastTriggerAt(context: Context): Long = prefs(context).getLong(KEY_LAST_TRIGGER_AT, 0L)
+    fun lastTriggerSource(context: Context): String =
+        prefs(context).getString(KEY_LAST_TRIGGER_SOURCE, "").orEmpty()
+
+    /** 仅在 Worker 真正开始执行时记录，不代表只是加入了队列。 */
+    fun markTriggered(context: Context, source: String) {
+        prefs(context).edit()
+            .putLong(KEY_LAST_TRIGGER_AT, System.currentTimeMillis())
+            .putString(KEY_LAST_TRIGGER_SOURCE, source)
+            .putBoolean(KEY_ANALYZING, true)
+            .commit()
+        notifyStateChanged(context)
+    }
 
     fun setAnalyzing(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_ANALYZING, value).commit()
@@ -217,6 +234,8 @@ object AiAnalysisPrefs {
             .putExtra(EXTRA_LAST_SUCCESS_AT, preferences.getLong(KEY_LAST_SUCCESS_AT, 0L))
             .putExtra(EXTRA_LAST_ERROR, preferences.getString(KEY_LAST_ERROR, "").orEmpty())
             .putExtra(EXTRA_ANALYZING, preferences.getBoolean(KEY_ANALYZING, false))
+            .putExtra(EXTRA_LAST_TRIGGER_AT, preferences.getLong(KEY_LAST_TRIGGER_AT, 0L))
+            .putExtra(EXTRA_LAST_TRIGGER_SOURCE, preferences.getString(KEY_LAST_TRIGGER_SOURCE, "").orEmpty())
         context.applicationContext.sendBroadcast(intent)
     }
 }

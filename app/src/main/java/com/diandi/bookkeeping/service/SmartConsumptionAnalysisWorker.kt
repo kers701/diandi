@@ -31,7 +31,11 @@ class SmartConsumptionAnalysisWorker(
     override suspend fun doRemoteWork(): ListenableWorker.Result {
         val context = applicationContext
         if (!AiAnalysisPrefs.isEnabled(context)) return ListenableWorker.Result.success()
-        AiAnalysisPrefs.setAnalyzing(context, true)
+        AiAnalysisPrefs.markTriggered(
+            context,
+            inputData.getString(AiAnalysisScheduler.KEY_TRIGGER_SOURCE)
+                ?: AiAnalysisScheduler.SOURCE_SCHEDULED
+        )
         return try {
             val success = SmartConsumptionAnalyzer.analyze(context)
             ListenableWorker.Result.success(
@@ -67,6 +71,9 @@ object AiAnalysisScheduler {
     private const val LEGACY_DAILY_WORK_NAME = "diandi_smart_consumption_analysis_daily"
     const val DAILY_WORK_NAME = "diandi_smart_consumption_analysis_daily_remote_v2"
     const val IMMEDIATE_WORK_NAME = "diandi_smart_consumption_analysis_immediate"
+    const val KEY_TRIGGER_SOURCE = "analysis_trigger_source"
+    const val SOURCE_SCHEDULED = "scheduled"
+    const val SOURCE_MANUAL = "manual"
 
     /** 应用启动时使用 KEEP，避免每次打开应用都把下次执行时间往后推。 */
     fun ensureScheduled(context: Context) = enqueue(context, ExistingPeriodicWorkPolicy.KEEP)
@@ -82,7 +89,7 @@ object AiAnalysisScheduler {
             AiAnalysisPrefs.setAnalyzing(appContext, true)
             val request = OneTimeWorkRequestBuilder<SmartConsumptionAnalysisWorker>()
                 .setConstraints(networkConstraints())
-                .setInputData(remoteWorkerData(appContext))
+                .setInputData(remoteWorkerData(appContext, SOURCE_MANUAL))
                 .build()
             WorkManager.getInstance(appContext).enqueueUniqueWork(
                 IMMEDIATE_WORK_NAME,
@@ -117,17 +124,18 @@ object AiAnalysisScheduler {
         )
             .setInitialDelay(delayUntilNextRun(AiAnalysisPrefs.dailyTime(appContext)), TimeUnit.MILLISECONDS)
             .setConstraints(networkConstraints())
-            .setInputData(remoteWorkerData(appContext))
+            .setInputData(remoteWorkerData(appContext, SOURCE_SCHEDULED))
             .build()
         WorkManager.getInstance(appContext)
             .enqueueUniquePeriodicWork(DAILY_WORK_NAME, policy, request)
     }
 
-    private fun remoteWorkerData(context: Context): Data {
+    private fun remoteWorkerData(context: Context, triggerSource: String): Data {
         val service = ComponentName(context, RemoteWorkerService::class.java)
         return Data.Builder()
             .putString(RemoteListenableWorker.ARGUMENT_PACKAGE_NAME, service.packageName)
             .putString(RemoteListenableWorker.ARGUMENT_CLASS_NAME, service.className)
+            .putString(KEY_TRIGGER_SOURCE, triggerSource)
             .build()
     }
 

@@ -49,12 +49,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
 import com.diandi.bookkeeping.service.AiAnalysisScheduler
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 
 @Suppress("DEPRECATION")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,9 +73,12 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     var outputChars by remember { mutableStateOf(AiAnalysisPrefs.maxOutputChars(context).toString()) }
     var analysisText by remember { mutableStateOf(AiAnalysisPrefs.result(context)) }
     var lastSuccessAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
+    var lastTriggerAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastTriggerAt(context)) }
+    var lastTriggerSource by remember { mutableStateOf(AiAnalysisPrefs.lastTriggerSource(context)) }
     var lastError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
     var enabledModelCount by remember { mutableIntStateOf(AiAnalysisPrefs.enabledCandidates(context).size) }
     var isAnalyzing by remember { mutableStateOf(AiAnalysisPrefs.isAnalyzing(context)) }
+    var dailyWorkStatus by remember { mutableStateOf("正在读取定时任务状态…") }
     var autoAnalysisAttempted by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var showModelConfigAction by remember { mutableStateOf(false) }
@@ -77,6 +86,8 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     fun refreshState() {
         analysisText = AiAnalysisPrefs.result(context)
         lastSuccessAt = AiAnalysisPrefs.lastSuccessAt(context)
+        lastTriggerAt = AiAnalysisPrefs.lastTriggerAt(context)
+        lastTriggerSource = AiAnalysisPrefs.lastTriggerSource(context)
         lastError = AiAnalysisPrefs.lastError(context)
         enabledModelCount = AiAnalysisPrefs.enabledCandidates(context).size
         isAnalyzing = AiAnalysisPrefs.isAnalyzing(context)
@@ -118,6 +129,37 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
         }
     }
 
+    LaunchedEffect(enabled, context) {
+        if (!enabled) {
+            dailyWorkStatus = "未启用"
+            return@LaunchedEffect
+        }
+        runCatching { AiAnalysisScheduler.ensureScheduled(context) }
+        while (true) {
+            dailyWorkStatus = withContext(Dispatchers.IO) {
+                runCatching {
+                    WorkManager.getInstance(context)
+                        .getWorkInfosForUniqueWork(AiAnalysisScheduler.DAILY_WORK_NAME)
+                        .get(10, TimeUnit.SECONDS)
+                }.fold(
+                    onSuccess = { workInfos ->
+                        when (workInfos.firstOrNull()?.state) {
+                            WorkInfo.State.ENQUEUED -> "已排队，等待设定时间、联网或系统调度"
+                            WorkInfo.State.RUNNING -> "正在执行"
+                            WorkInfo.State.BLOCKED -> "等待任务条件满足"
+                            WorkInfo.State.SUCCEEDED -> "最近一次任务已完成"
+                            WorkInfo.State.FAILED -> "任务失败"
+                            WorkInfo.State.CANCELLED -> "任务已取消"
+                            null -> "未找到每日定时任务"
+                        }
+                    },
+                    onFailure = { error -> "状态读取失败：${error.message ?: "未知错误"}" }
+                )
+            }
+            delay(15_000)
+        }
+    }
+
     DisposableEffect(context) {
         val preferences = context.getSharedPreferences(
             "smart_consumption_analysis", android.content.Context.MODE_MULTI_PROCESS
@@ -134,6 +176,9 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                 enabled = update.getBooleanExtra(AiAnalysisPrefs.EXTRA_ENABLED, enabled)
                 analysisText = update.getStringExtra(AiAnalysisPrefs.EXTRA_RESULT) ?: analysisText
                 lastSuccessAt = update.getLongExtra(AiAnalysisPrefs.EXTRA_LAST_SUCCESS_AT, lastSuccessAt)
+                lastTriggerAt = update.getLongExtra(AiAnalysisPrefs.EXTRA_LAST_TRIGGER_AT, lastTriggerAt)
+                lastTriggerSource = update.getStringExtra(AiAnalysisPrefs.EXTRA_LAST_TRIGGER_SOURCE)
+                    ?: lastTriggerSource
                 lastError = update.getStringExtra(AiAnalysisPrefs.EXTRA_LAST_ERROR) ?: lastError
                 isAnalyzing = update.getBooleanExtra(AiAnalysisPrefs.EXTRA_ANALYZING, isAnalyzing)
                 enabledModelCount = AiAnalysisPrefs.enabledCandidates(context).size
@@ -294,6 +339,20 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                         .withZone(ZoneId.systemDefault())
                         .format(Instant.ofEpochMilli(lastSuccessAt))
                     Text("最近成功分析：$formatted", style = MaterialTheme.typography.bodySmall)
+                }
+                Text("每日定时任务：$dailyWorkStatus", style = MaterialTheme.typography.bodySmall)
+                if (lastTriggerAt > 0L) {
+                    val formatted = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                        .withZone(ZoneId.systemDefault())
+                        .format(Instant.ofEpochMilli(lastTriggerAt))
+                    val sourceLabel = when (lastTriggerSource) {
+                        AiAnalysisScheduler.SOURCE_SCHEDULED -> "每日定时"
+                        AiAnalysisScheduler.SOURCE_MANUAL -> "手动"
+                        else -> "未知来源"
+                    }
+                    Text("最近实际触发：$formatted（$sourceLabel）", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text("最近实际触发：暂无记录", style = MaterialTheme.typography.bodySmall)
                 }
                 if (lastError.isNotBlank()) {
                     Text(lastError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
