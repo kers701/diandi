@@ -50,6 +50,9 @@ import java.time.format.DateTimeFormatter
 fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var homeTotalsPeriod by remember(context) {
+        mutableStateOf(AppPrefs.getHomeTotalsPeriod(context))
+    }
     var notificationAccessGranted by remember(context) {
         mutableStateOf(isAutoBillNotificationAccessGranted(context))
     }
@@ -177,11 +180,56 @@ fun AboutScreen(onBack: () -> Unit) {
             HelpLine("添加账单", "右下角 +，可选支出或收入；支持大类、标签、备注与日期。")
             HelpLine("首页筛选", "类型：全部/支出/收入；时间：全部/本年/本月/本日；搜索支持标签与类目模糊匹配；另可详细筛选。")
             HelpLine("攒钱目标", "设置目标金额并记录进度；首页与通知可显示「余额/目标」进度。")
-            HelpLine("资金修正", "调整起始余额（例如修正 +800，初始余额即为 800）。")
+            HelpLine("资金修正", "可记录修正来源与备注；向左滑动记录可退出操作栏、编辑或删除。")
             HelpLine("统计图表", "支出趋势与大类分布，可按年/月/日维度查看。")
             HelpLine("应用白名单", "在软件说明中选择要监听的支付/短信等应用；选择列表中已勾选项置顶。")
             HelpLine("检查更新", "首页顶栏更新图标，从 GitHub Releases 检测并下载安装。")
             HelpLine("通知快捷", "点击常驻通知打开独立记账页，保存后关闭，不进入主界面；独立进程 + 划掉后自启。")
+
+            HorizontalDivider()
+
+            Text("首页收入/支出统计", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "选择首页卡片的收入与支出统计周期，日期基准为本日；当前余额仍按全部账单和资金修正计算。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = homeTotalsPeriod == AppPrefs.HOME_TOTALS_TODAY,
+                    onClick = {
+                        homeTotalsPeriod = AppPrefs.HOME_TOTALS_TODAY
+                        AppPrefs.setHomeTotalsPeriod(context, homeTotalsPeriod)
+                    },
+                    label = { Text("计算本日") }
+                )
+                FilterChip(
+                    selected = homeTotalsPeriod == AppPrefs.HOME_TOTALS_MONTH,
+                    onClick = {
+                        homeTotalsPeriod = AppPrefs.HOME_TOTALS_MONTH
+                        AppPrefs.setHomeTotalsPeriod(context, homeTotalsPeriod)
+                    },
+                    label = { Text("计算本月") }
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = homeTotalsPeriod == AppPrefs.HOME_TOTALS_YEAR,
+                    onClick = {
+                        homeTotalsPeriod = AppPrefs.HOME_TOTALS_YEAR
+                        AppPrefs.setHomeTotalsPeriod(context, homeTotalsPeriod)
+                    },
+                    label = { Text("计算本年") }
+                )
+                FilterChip(
+                    selected = homeTotalsPeriod == AppPrefs.HOME_TOTALS_ALL,
+                    onClick = {
+                        homeTotalsPeriod = AppPrefs.HOME_TOTALS_ALL
+                        AppPrefs.setHomeTotalsPeriod(context, homeTotalsPeriod)
+                    },
+                    label = { Text("计算全部") }
+                )
+            }
 
             HorizontalDivider()
 

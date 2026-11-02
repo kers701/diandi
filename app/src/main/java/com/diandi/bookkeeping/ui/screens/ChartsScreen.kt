@@ -1,6 +1,7 @@
 package com.diandi.bookkeeping.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -11,17 +12,24 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import java.time.LocalDate
+import kotlinx.coroutines.launch
+import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -55,11 +63,11 @@ fun ChartsScreen(
         "month" -> selectedDate.withDayOfMonth(1)
         else -> selectedDate.minusDays(2)
     }
-    val lineEndDate = when (period) {
-        "year" -> LocalDate.of(selectedDate.year, 12, 31)
-        "month" -> selectedDate.withDayOfMonth(selectedDate.lengthOfMonth())
-        else -> selectedDate
+    val lineEndDate = selectedDate
+    var selectedPointDate by remember(lineStartDate, lineEndDate) {
+        mutableStateOf<LocalDate?>(null)
     }
+    val coroutineScope = rememberCoroutineScope()
     val dailyRangeFlow = remember(viewModel, lineStartDate, lineEndDate) {
         viewModel.getDailyStatsInRange(lineStartDate.toString(), lineEndDate.toString())
     }
@@ -163,17 +171,112 @@ fun ChartsScreen(
                         val maxE = (expenses.maxOrNull() ?: 1f).coerceAtLeast(1f)
                         val lineColor = MaterialTheme.colorScheme.primary
                         val labelColor = MaterialTheme.colorScheme.onSurface
+                        val selectedPointBubbleColor = MaterialTheme.colorScheme.surface
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             val chartWidth = maxOf(
                                 maxWidth,
                                 24.dp * (linePoints.size - 1).toFloat() + 32.dp
                             )
-                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                            val chartScrollState = rememberScrollState()
+                            LaunchedEffect(period, selectedDate) {
+                                withFrameNanos { }
+                                chartScrollState.animateScrollTo(chartScrollState.maxValue)
+                            }
+                            val density = LocalDensity.current
+                            val viewportWidthPx = with(density) { maxWidth.toPx() }
+                            val plotWidthPx = with(density) { (chartWidth - 32.dp).toPx() }
+                                .coerceAtLeast(1f)
+                            val horizontalInsetPx = with(density) { 16.dp.toPx() }
+                            val pointSpacingPx = if (linePoints.size > 1) {
+                                plotWidthPx / linePoints.lastIndex
+                            } else 1f
+                            val firstVisibleIndex = if (linePoints.size > 1) {
+                                ceil(((chartScrollState.value - horizontalInsetPx) / pointSpacingPx).toDouble())
+                                    .toInt().coerceIn(0, linePoints.lastIndex)
+                            } else 0
+                            val lastVisibleIndex = if (linePoints.size > 1) {
+                                floor(((chartScrollState.value + viewportWidthPx - horizontalInsetPx) / pointSpacingPx).toDouble())
+                                    .toInt().coerceIn(firstVisibleIndex, linePoints.lastIndex)
+                            } else 0
+                            val viewportStart = linePoints[firstVisibleIndex].first
+                            val viewportEnd = linePoints[lastVisibleIndex].first
+                            val viewportRange = if (period == "day") {
+                                "$viewportStart 至 $viewportEnd"
+                            } else {
+                                "${viewportStart.monthValue}-${viewportStart.dayOfMonth} 至 " +
+                                    "${viewportEnd.monthValue}-${viewportEnd.dayOfMonth}"
+                            }
+                            val markerHitRadiusPx = with(density) { 18.dp.toPx() }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "当前视口：$viewportRange",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        "基准日期：$selectedDate",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(
+                                    enabled = chartScrollState.maxValue > 0,
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            chartScrollState.animateScrollTo(chartScrollState.maxValue)
+                                        }
+                                    }
+                                ) { Text("回到基准日") }
+                            }
+                            Row(Modifier.fillMaxWidth().horizontalScroll(chartScrollState)) {
                                 Canvas(
                                     modifier = Modifier
                                         .width(chartWidth)
                                         .height(260.dp)
                                         .padding(horizontal = 16.dp, vertical = 8.dp)
+                                        .pointerInput(linePoints, selectedPointDate) {
+                                            detectTapGestures { tap ->
+                                                val pointCount = linePoints.size
+                                                val plotWidth = size.width.toFloat()
+                                                val chartHeight = size.height - 28f - 36f
+                                                var closestIndex = -1
+                                                var closestDistanceSquared = Float.MAX_VALUE
+                                                linePoints.forEachIndexed { index, (_, amount) ->
+                                                    if (amount > 0f) {
+                                                        val x = if (pointCount == 1) plotWidth / 2f
+                                                        else index * plotWidth / (pointCount - 1)
+                                                        val y = 28f + chartHeight -
+                                                            (amount / maxE) * chartHeight * 0.9f
+                                                        val dx = tap.x - x
+                                                        val dy = tap.y - y
+                                                        val distanceSquared = dx * dx + dy * dy
+                                                        if (distanceSquared < closestDistanceSquared) {
+                                                            closestDistanceSquared = distanceSquared
+                                                            closestIndex = index
+                                                        }
+                                                    }
+                                                }
+                                                val pointSpacing = if (pointCount > 1) {
+                                                    plotWidth / (pointCount - 1)
+                                                } else plotWidth
+                                                val hitRadius = min(markerHitRadiusPx, pointSpacing * 0.48f)
+                                                if (closestIndex >= 0 &&
+                                                    closestDistanceSquared <= hitRadius * hitRadius
+                                                ) {
+                                                    val tappedDate = linePoints[closestIndex].first
+                                                    selectedPointDate = if (selectedPointDate == tappedDate) {
+                                                        null
+                                                    } else tappedDate
+                                                } else {
+                                                    selectedPointDate = null
+                                                }
+                                            }
+                                        }
                                 ) {
                                     val w = size.width
                                     val h = size.height
@@ -205,20 +308,44 @@ fun ChartsScreen(
                                         isAntiAlias = true
                                     }
                                     points.forEachIndexed { i, (pt, v) ->
-                                        if (i % labelInterval == 0 || i == n - 1) {
-                                            val markerRadius = if (n > 100) 3.5f else 7f
+                                        val date = linePoints[i].first
+                                        if (v > 0f) {
+                                            val markerRadius = if (n > 100) 5f else 7f
                                             drawCircle(lineColor, radius = markerRadius, center = pt)
                                             drawCircle(Color.White, radius = markerRadius / 2f, center = pt)
-                                            if (n <= 3) {
-                                                textPaint.textSize = 28f
-                                                drawContext.canvas.nativeCanvas.drawText(
-                                                    formatShort(v),
-                                                    pt.x,
-                                                    (pt.y - 14f).coerceAtLeast(22f),
-                                                    textPaint
-                                                )
-                                            }
-                                            val date = linePoints[i].first
+                                        }
+                                        if (date == selectedPointDate && v > 0f) {
+                                            val amountLabel = "¥${"%.2f".format(v)}"
+                                            textPaint.textSize = 30f
+                                            textPaint.isFakeBoldText = true
+                                            val bubbleWidth = textPaint.measureText(amountLabel) + 20f
+                                            val bubbleHeight = 42f
+                                            val centerX = if (w > bubbleWidth + 4f) {
+                                                pt.x.coerceIn(bubbleWidth / 2f + 2f, w - bubbleWidth / 2f - 2f)
+                                            } else w / 2f
+                                            val bubbleTop = (pt.y - bubbleHeight - 12f).coerceAtLeast(2f)
+                                            drawRoundRect(
+                                                color = selectedPointBubbleColor,
+                                                topLeft = Offset(centerX - bubbleWidth / 2f, bubbleTop),
+                                                size = Size(bubbleWidth, bubbleHeight),
+                                                cornerRadius = CornerRadius(10f, 10f)
+                                            )
+                                            drawRoundRect(
+                                                color = lineColor,
+                                                topLeft = Offset(centerX - bubbleWidth / 2f, bubbleTop),
+                                                size = Size(bubbleWidth, bubbleHeight),
+                                                cornerRadius = CornerRadius(10f, 10f),
+                                                style = Stroke(width = 2f)
+                                            )
+                                            drawContext.canvas.nativeCanvas.drawText(
+                                                amountLabel,
+                                                centerX,
+                                                bubbleTop + 29f,
+                                                textPaint
+                                            )
+                                            textPaint.isFakeBoldText = false
+                                        }
+                                        if (i % labelInterval == 0 || i == n - 1 || date == selectedDate) {
                                             textPaint.textSize = 24f
                                             drawContext.canvas.nativeCanvas.drawText(
                                                 "${date.monthValue}-${date.dayOfMonth}",
@@ -355,13 +482,5 @@ fun ChartsScreen(
         ) {
             DatePicker(state = pickerState)
         }
-    }
-}
-
-private fun formatShort(v: Float): String {
-    return when {
-        v >= 10000 -> "${"%.1f".format(v / 10000)}万"
-        v >= 1000 -> "${"%.1f".format(v / 1000)}k"
-        else -> "%.0f".format(v)
     }
 }

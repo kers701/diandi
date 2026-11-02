@@ -28,6 +28,8 @@ class BookkeepingRepository(private val dao: TransactionDao) {
 
     fun getTotalIncome() = dao.getTotalIncome()
     fun getTotalExpense() = dao.getTotalExpense()
+    fun getTransactionTotals(startDate: String?, endDate: String?) =
+        dao.getTransactionTotals(startDate, endDate)
     fun getTotalCorrection() = dao.getTotalCorrection()
 
     /** 当前余额 = 资金修正总和 + 收入 - 支出 */
@@ -53,5 +55,6 @@ class BookkeepingRepository(private val dao: TransactionDao) {
 
     fun getAllCorrections() = dao.getAllCorrections()
     suspend fun addCorrection(c: FundCorrection) = dao.insertCorrection(c)
+    suspend fun updateCorrection(c: FundCorrection) = dao.updateCorrection(c)
     suspend fun deleteCorrection(c: FundCorrection) = dao.deleteCorrection(c)
 }

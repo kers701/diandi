@@ -50,6 +50,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
 import com.diandi.bookkeeping.data.dao.CategoryStat
+import com.diandi.bookkeeping.data.dao.TransactionTotals
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.ui.components.BalanceCard
 import com.diandi.bookkeeping.ui.components.TypeChip
@@ -57,6 +58,7 @@ import com.diandi.bookkeeping.ui.components.formatMoney
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.AppUpdateChecker
+import com.diandi.bookkeeping.util.AppPrefs
 import com.diandi.bookkeeping.util.allocateBalanceByWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -83,19 +85,40 @@ fun HomeScreen(
     onEditClick: (Long) -> Unit = {},
     onAiAnalysisClick: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val transactions by viewModel.transactions.collectAsState()
     val balance by viewModel.balance.collectAsState()
-    val income by viewModel.totalIncome.collectAsState()
-    val expense by viewModel.totalExpense.collectAsState()
     val filter by viewModel.filter.collectAsState()
+    var homeTotalsPeriod by remember(context) {
+        mutableStateOf(AppPrefs.getHomeTotalsPeriod(context))
+    }
+    var totalsBaseDate by remember { mutableStateOf(LocalDate.now()) }
+    val totalsStartDate = when (homeTotalsPeriod) {
+        AppPrefs.HOME_TOTALS_TODAY -> totalsBaseDate
+        AppPrefs.HOME_TOTALS_MONTH -> totalsBaseDate.withDayOfMonth(1)
+        AppPrefs.HOME_TOTALS_YEAR -> LocalDate.of(totalsBaseDate.year, 1, 1)
+        else -> null
+    }
+    val totalsEndDate = if (homeTotalsPeriod == AppPrefs.HOME_TOTALS_ALL) null else totalsBaseDate.toString()
+    val totalsFlow = remember(viewModel, homeTotalsPeriod, totalsBaseDate) {
+        viewModel.getTransactionTotals(totalsStartDate?.toString(), totalsEndDate)
+    }
+    val totals by totalsFlow.collectAsState(initial = TransactionTotals(0.0, 0.0))
+    val income = totals.income
+    val expense = totals.expense
+    val totalsPeriodLabel = when (homeTotalsPeriod) {
+        AppPrefs.HOME_TOTALS_TODAY -> "本日"
+        AppPrefs.HOME_TOTALS_MONTH -> "本月"
+        AppPrefs.HOME_TOTALS_YEAR -> "本年"
+        else -> "全部"
+    }
 
     var showFilterSheet by remember { mutableStateOf(false) }
     var showBillsPage by rememberSaveable { mutableStateOf(false) }
     var showCategoryEditConfirm by remember { mutableStateOf(false) }
     var titleTapCount by remember { mutableIntStateOf(0) }
     var lastTitleTapAt by remember { mutableLongStateOf(0L) }
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     var smartAnalysisEnabled by remember { mutableStateOf(AiAnalysisPrefs.isEnabled(context)) }
     var smartAnalysisResult by remember { mutableStateOf(AiAnalysisPrefs.result(context)) }
     var smartAnalysisError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
@@ -131,6 +154,8 @@ fun HomeScreen(
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                homeTotalsPeriod = AppPrefs.getHomeTotalsPeriod(context)
+                totalsBaseDate = LocalDate.now()
                 smartAnalysisEnabled = AiAnalysisPrefs.isEnabled(context)
                 smartAnalysisResult = AiAnalysisPrefs.result(context)
                 smartAnalysisError = AiAnalysisPrefs.lastError(context)
@@ -322,6 +347,7 @@ fun HomeScreen(
                     balance = balance,
                     income = income,
                     expense = expense,
+                    summaryPeriodLabel = totalsPeriodLabel,
                     accentColor = balanceAccent
                 )
 

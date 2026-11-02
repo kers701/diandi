@@ -13,6 +13,11 @@ object AppPrefs {
     private const val FILE_AUTO_BILL_SEEN = "auto_bill_seen"
     private const val FILE_CAT_EXPENSE = "categories_expense"
     private const val FILE_CAT_INCOME = "categories_income"
+    private const val FILE_HOME_TOTALS_PERIOD = "home_totals_period"
+    const val HOME_TOTALS_TODAY = "today"
+    const val HOME_TOTALS_MONTH = "month"
+    const val HOME_TOTALS_YEAR = "year"
+    const val HOME_TOTALS_ALL = "all"
     private const val MAX_SEEN = 240
     private const val DEDUP_WINDOW_MS = 3 * 60 * 1000L
 
@@ -36,6 +41,20 @@ object AppPrefs {
         File(context.applicationContext.filesDir, FILE_AUTO_BILL_KEYWORDS_BLOCK)
     private fun seenFile(context: Context): File =
         File(context.applicationContext.filesDir, FILE_AUTO_BILL_SEEN)
+    private fun homeTotalsPeriodFile(context: Context): File =
+        File(context.applicationContext.filesDir, FILE_HOME_TOTALS_PERIOD)
+
+    fun getHomeTotalsPeriod(context: Context): String =
+        homeTotalsPeriodFile(context).takeIf { it.exists() }?.readText()?.trim()
+            ?.takeIf {
+                it in setOf(HOME_TOTALS_TODAY, HOME_TOTALS_MONTH, HOME_TOTALS_YEAR, HOME_TOTALS_ALL)
+            }
+            ?: HOME_TOTALS_ALL
+
+    fun setHomeTotalsPeriod(context: Context, period: String) {
+        require(period in setOf(HOME_TOTALS_TODAY, HOME_TOTALS_MONTH, HOME_TOTALS_YEAR, HOME_TOTALS_ALL))
+        homeTotalsPeriodFile(context).writeText(period)
+    }
 
     fun isNotifyEnabled(context: Context): Boolean {
         val f = flagFile(context)

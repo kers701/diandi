@@ -237,15 +237,34 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         viewModelScope.launch { repo.deleteGoal(goal) }
     }
 
-    fun addCorrection(amount: Double, note: String = "", date: LocalDate = LocalDate.now()) {
+    fun addCorrection(
+        amount: Double,
+        note: String = "",
+        date: LocalDate = LocalDate.now(),
+        source: String = "手动"
+    ) {
         viewModelScope.launch {
             repo.addCorrection(
                 FundCorrection(
                     amount = amount,
+                    source = source.trim().ifBlank { "手动" },
                     note = note,
                     year = date.year,
                     month = date.monthValue,
                     day = date.dayOfMonth
+                )
+            )
+        }
+    }
+
+    fun updateCorrection(correction: FundCorrection, amount: Double, source: String, note: String) {
+        if (!amount.isFinite()) return
+        viewModelScope.launch {
+            repo.updateCorrection(
+                correction.copy(
+                    amount = amount,
+                    source = source.trim().ifBlank { "手动" },
+                    note = note
                 )
             )
         }
@@ -261,6 +280,8 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
     fun getDailyStats(year: Int, month: Int) = repo.getDailyStats(year, month)
     fun getDailyStatsInRange(startDate: String, endDate: String) =
         repo.getDailyStatsInRange(startDate, endDate)
+    fun getTransactionTotals(startDate: String?, endDate: String?) =
+        repo.getTransactionTotals(startDate, endDate)
 }
 
 class MainViewModelFactory(private val repo: BookkeepingRepository) : ViewModelProvider.Factory {

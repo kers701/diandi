@@ -24,6 +24,7 @@ fun BalanceCard(
     balance: Double,
     income: Double,
     expense: Double,
+    summaryPeriodLabel: String = "",
     modifier: Modifier = Modifier,
     accentColor: Color = MaterialTheme.colorScheme.primary
 ) {
@@ -50,7 +51,11 @@ fun BalanceCard(
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("收入", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    Text(
+                        if (summaryPeriodLabel.isBlank()) "收入" else "${summaryPeriodLabel}收入",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 12.sp
+                    )
                     Text(
                         formatMoney(income),
                         color = Color.White,
@@ -58,7 +63,11 @@ fun BalanceCard(
                     )
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("支出", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    Text(
+                        if (summaryPeriodLabel.isBlank()) "支出" else "${summaryPeriodLabel}支出",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 12.sp
+                    )
                     Text(
                         formatMoney(expense),
                         color = Color.White,

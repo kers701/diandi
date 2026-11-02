@@ -54,6 +54,8 @@ data class FundCorrection(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val amount: Double,                 // 可为正负，+800 表示初始设为 800
+    @ColumnInfo(defaultValue = "'手动'")
+    val source: String = "手动",
     val note: String = "",
     val year: Int,
     val month: Int,

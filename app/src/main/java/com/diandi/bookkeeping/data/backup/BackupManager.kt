@@ -204,6 +204,7 @@ object BackupManager {
                 FundCorrection(
                     id = id,
                     amount = amount,
+                    source = item.optString("source", "手动").ifBlank { "手动" },
                     note = item.getString("note"),
                     year = year,
                     month = month,
@@ -268,6 +269,7 @@ object BackupManager {
     private fun FundCorrection.toJson() = JSONObject()
         .put("id", id)
         .put("amount", amount)
+        .put("source", source)
         .put("note", note)
         .put("year", year)
         .put("month", month)

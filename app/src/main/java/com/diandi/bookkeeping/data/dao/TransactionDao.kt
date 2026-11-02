@@ -90,6 +90,16 @@ interface TransactionDao {
     @Query("SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'EXPENSE'")
     fun getTotalExpense(): Flow<Double>
 
+    @Query("""
+        SELECT
+            COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0.0) AS income,
+            COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0.0) AS expense
+        FROM transactions
+        WHERE (:startDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) >= :startDate)
+          AND (:endDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) <= :endDate)
+    """)
+    fun getTransactionTotals(startDate: String?, endDate: String?): Flow<TransactionTotals>
+
     // 按年月分组统计（折线图用）
     @Query("""
         SELECT year, month,
@@ -183,6 +193,9 @@ interface TransactionDao {
     @Insert
     suspend fun insertCorrection(correction: FundCorrection): Long
 
+    @Update
+    suspend fun updateCorrection(correction: FundCorrection)
+
     @Delete
     suspend fun deleteCorrection(correction: FundCorrection)
 }
@@ -205,4 +218,9 @@ data class DailyStat(
 data class CategoryStat(
     val category: String,
     val total: Double
+)
+
+data class TransactionTotals(
+    val income: Double,
+    val expense: Double
 )
