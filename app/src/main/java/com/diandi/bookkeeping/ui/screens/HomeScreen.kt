@@ -38,13 +38,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -379,16 +375,13 @@ fun HomeScreen(
                                 val goalProgress = if (goal.targetAmount > 0.0) {
                                     (displayed / goal.targetAmount).coerceIn(0.0, 1.0).toFloat()
                                 } else 0f
-                                val weightLabel = if (goal.allocationWeight % 1.0 == 0.0) {
-                                    goal.allocationWeight.toInt().toString()
-                                } else goal.allocationWeight.toString()
                                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Row(
                                         Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            "${goal.title} · 权重 $weightLabel",
+                                            "${goal.title}•${(goalProgress * 100).roundToInt()}%",
                                             style = MaterialTheme.typography.labelMedium
                                         )
                                         Text(
@@ -431,7 +424,7 @@ fun HomeScreen(
                                 Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
                             ) {
                                 Text(
-                                    highlightMoneyAmounts(smartAnalysisResult),
+                                    smartAnalysisResult,
                                     modifier = Modifier.pointerInput(smartAnalysisResult) {
                                         detectTapGestures(onDoubleTap = {
                                             showCopyAnalysisConfirm = true
@@ -883,23 +876,6 @@ private fun HomeCategoryChart(
             }
         }
     }
-}
-
-private val MONEY_AMOUNT_PATTERN = Regex("""[¥￥]\s*[+-]?\d[\d,]*(?:\.\d+)?|[+-]?\d[\d,]*(?:\.\d+)?\s*(?:元|块)""")
-
-private fun highlightMoneyAmounts(text: String): AnnotatedString = buildAnnotatedString {
-    var cursor = 0
-    MONEY_AMOUNT_PATTERN.findAll(text).forEach { match ->
-        val start = match.range.first
-        if (start >= cursor) {
-            append(text.substring(cursor, start))
-            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
-                append(match.value)
-            }
-            cursor = match.range.last + 1
-        }
-    }
-    if (cursor < text.length) append(text.substring(cursor))
 }
 
 private fun balanceAccentColor(balance: Double): Color {
