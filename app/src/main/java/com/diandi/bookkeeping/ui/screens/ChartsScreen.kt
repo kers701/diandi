@@ -21,15 +21,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import java.time.LocalDate
 import kotlinx.coroutines.launch
-import kotlin.math.ceil
 import kotlin.math.cos
-import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -165,6 +162,11 @@ fun ChartsScreen(
                         "支出趋势（$periodDescription）",
                         style = MaterialTheme.typography.titleMedium
                     )
+                    Text(
+                        "双击折线图空白处回到基准日期；点击支出节点显示金额",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     if (dailyRangeStats.none { it.expense > 0.0 }) {
                         Text("该周期暂无支出数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
@@ -187,109 +189,46 @@ fun ChartsScreen(
                                 withFrameNanos { }
                                 chartScrollState.animateScrollTo(chartEndScrollPx)
                             }
-                            val viewportWidthPx = with(density) { maxWidth.toPx() }
-                            val plotWidthPx = with(density) { (chartWidth - 32.dp).toPx() }
-                                .coerceAtLeast(1f)
-                            val horizontalInsetPx = with(density) { 16.dp.toPx() }
-                            val pointSpacingPx = if (linePoints.size > 1) {
-                                plotWidthPx / linePoints.lastIndex
-                            } else 1f
-                            val firstVisibleIndex = if (linePoints.size > 1) {
-                                ceil(((chartScrollState.value - horizontalInsetPx) / pointSpacingPx).toDouble())
-                                    .toInt().coerceIn(0, linePoints.lastIndex)
-                            } else 0
-                            val lastVisibleIndex = if (linePoints.size > 1) {
-                                floor(((chartScrollState.value + viewportWidthPx - horizontalInsetPx) / pointSpacingPx).toDouble())
-                                    .toInt().coerceIn(firstVisibleIndex, linePoints.lastIndex)
-                            } else 0
-                            val viewportStart = linePoints[firstVisibleIndex].first
-                            val viewportEnd = linePoints[lastVisibleIndex].first
-                            val viewportRange = if (period == "day") {
-                                "$viewportStart 至 $viewportEnd"
-                            } else {
-                                "${viewportStart.monthValue}-${viewportStart.dayOfMonth} 至 " +
-                                    "${viewportEnd.monthValue}-${viewportEnd.dayOfMonth}"
-                            }
                             val markerHitRadiusPx = with(density) { 18.dp.toPx() }
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            "当前视口：$viewportRange",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            "基准日期：$selectedDate",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    TextButton(
-                                        onClick = {
-                                            coroutineScope.launch {
-                                                withFrameNanos { }
-                                                chartScrollState.animateScrollTo(chartEndScrollPx)
-                                            }
-                                        }
-                                    ) { Text("回到基准日") }
-                                }
-                            }
-                            Spacer(Modifier.height(12.dp))
                             Row(Modifier.fillMaxWidth().horizontalScroll(chartScrollState)) {
                                 Canvas(
                                     modifier = Modifier
                                         .width(chartWidth)
                                         .height(260.dp)
                                         .padding(horizontal = 16.dp, vertical = 8.dp)
-                                        .pointerInput(linePoints, selectedPointDate) {
-                                            detectTapGestures { tap ->
-                                                val pointCount = linePoints.size
-                                                val plotWidth = size.width.toFloat()
-                                                val chartHeight = size.height - 28f - 36f
-                                                var closestIndex = -1
-                                                var closestDistanceSquared = Float.MAX_VALUE
-                                                linePoints.forEachIndexed { index, (_, amount) ->
-                                                    if (amount > 0f) {
-                                                        val x = if (pointCount == 1) plotWidth / 2f
-                                                        else index * plotWidth / (pointCount - 1)
-                                                        val y = 28f + chartHeight -
-                                                            (amount / maxE) * chartHeight * 0.9f
-                                                        val dx = tap.x - x
-                                                        val dy = tap.y - y
-                                                        val distanceSquared = dx * dx + dy * dy
-                                                        if (distanceSquared < closestDistanceSquared) {
-                                                            closestDistanceSquared = distanceSquared
-                                                            closestIndex = index
+                                        .pointerInput(linePoints, selectedPointDate, chartEndScrollPx) {
+                                            detectTapGestures(
+                                                onTap = { tap ->
+                                                    val pointIndex = findExpensePointAt(
+                                                        points = linePoints,
+                                                        tap = tap,
+                                                        width = size.width.toFloat(),
+                                                        height = size.height.toFloat(),
+                                                        maxValue = maxE,
+                                                        markerHitRadius = markerHitRadiusPx
+                                                    )
+                                                    selectedPointDate = if (pointIndex >= 0) {
+                                                        val tappedDate = linePoints[pointIndex].first
+                                                        if (selectedPointDate == tappedDate) null else tappedDate
+                                                    } else null
+                                                },
+                                                onDoubleTap = { tap ->
+                                                    val pointIndex = findExpensePointAt(
+                                                        points = linePoints,
+                                                        tap = tap,
+                                                        width = size.width.toFloat(),
+                                                        height = size.height.toFloat(),
+                                                        maxValue = maxE,
+                                                        markerHitRadius = markerHitRadiusPx
+                                                    )
+                                                    if (pointIndex < 0) {
+                                                        coroutineScope.launch {
+                                                            withFrameNanos { }
+                                                            chartScrollState.animateScrollTo(chartEndScrollPx)
                                                         }
                                                     }
                                                 }
-                                                val pointSpacing = if (pointCount > 1) {
-                                                    plotWidth / (pointCount - 1)
-                                                } else plotWidth
-                                                val hitRadius = min(markerHitRadiusPx, pointSpacing * 0.48f)
-                                                if (closestIndex >= 0 &&
-                                                    closestDistanceSquared <= hitRadius * hitRadius
-                                                ) {
-                                                    val tappedDate = linePoints[closestIndex].first
-                                                    selectedPointDate = if (selectedPointDate == tappedDate) {
-                                                        null
-                                                    } else tappedDate
-                                                } else {
-                                                    selectedPointDate = null
-                                                }
-                                            }
+                                            )
                                         }
                                 ) {
                                     val w = size.width
@@ -497,4 +436,38 @@ fun ChartsScreen(
             DatePicker(state = pickerState)
         }
     }
+}
+
+private fun findExpensePointAt(
+    points: List<Pair<LocalDate, Float>>,
+    tap: Offset,
+    width: Float,
+    height: Float,
+    maxValue: Float,
+    markerHitRadius: Float
+): Int {
+    if (points.isEmpty()) return -1
+
+    val plotHeight = height - 28f - 36f
+    var nearestIndex = -1
+    var nearestDistanceSquared = Float.MAX_VALUE
+
+    points.forEachIndexed { index, (_, amount) ->
+        if (amount > 0f) {
+            val x = if (points.size == 1) width / 2f else index * width / (points.size - 1)
+            val y = 28f + plotHeight - (amount / maxValue) * plotHeight * 0.9f
+            val dx = tap.x - x
+            val dy = tap.y - y
+            val distanceSquared = dx * dx + dy * dy
+            if (distanceSquared < nearestDistanceSquared) {
+                nearestDistanceSquared = distanceSquared
+                nearestIndex = index
+            }
+        }
+    }
+
+    if (nearestIndex < 0) return -1
+    val pointSpacing = if (points.size > 1) width / (points.size - 1) else width
+    val hitRadius = min(markerHitRadius, pointSpacing * 0.48f)
+    return if (nearestDistanceSquared <= hitRadius * hitRadius) nearestIndex else -1
 }
