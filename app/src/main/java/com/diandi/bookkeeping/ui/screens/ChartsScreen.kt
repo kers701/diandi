@@ -31,6 +31,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private val PIE_COLORS = listOf(
@@ -177,12 +178,15 @@ fun ChartsScreen(
                                 maxWidth,
                                 24.dp * (linePoints.size - 1).toFloat() + 32.dp
                             )
-                            val chartScrollState = rememberScrollState()
-                            LaunchedEffect(period, selectedDate) {
-                                withFrameNanos { }
-                                chartScrollState.animateScrollTo(chartScrollState.maxValue)
-                            }
                             val density = LocalDensity.current
+                            val chartEndScrollPx = with(density) {
+                                ((chartWidth - maxWidth).toPx().roundToInt()).coerceAtLeast(0)
+                            }
+                            val chartScrollState = rememberScrollState()
+                            LaunchedEffect(period, selectedDate, chartEndScrollPx) {
+                                withFrameNanos { }
+                                chartScrollState.animateScrollTo(chartEndScrollPx)
+                            }
                             val viewportWidthPx = with(density) { maxWidth.toPx() }
                             val plotWidthPx = with(density) { (chartWidth - 32.dp).toPx() }
                                 .coerceAtLeast(1f)
@@ -207,32 +211,42 @@ fun ChartsScreen(
                                     "${viewportEnd.monthValue}-${viewportEnd.dayOfMonth}"
                             }
                             val markerHitRadiusPx = with(density) { 18.dp.toPx() }
-                            Row(
+                            Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
                             ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        "当前视口：$viewportRange",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        "基准日期：$selectedDate",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                TextButton(
-                                    enabled = chartScrollState.maxValue > 0,
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            chartScrollState.animateScrollTo(chartScrollState.maxValue)
-                                        }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "当前视口：$viewportRange",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            "基准日期：$selectedDate",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
-                                ) { Text("回到基准日") }
+                                    TextButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                withFrameNanos { }
+                                                chartScrollState.animateScrollTo(chartEndScrollPx)
+                                            }
+                                        }
+                                    ) { Text("回到基准日") }
+                                }
                             }
+                            Spacer(Modifier.height(12.dp))
                             Row(Modifier.fillMaxWidth().horizontalScroll(chartScrollState)) {
                                 Canvas(
                                     modifier = Modifier
