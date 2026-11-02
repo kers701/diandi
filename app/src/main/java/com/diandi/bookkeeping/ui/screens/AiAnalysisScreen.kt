@@ -52,12 +52,12 @@ import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
+import com.diandi.bookkeeping.data.ai.AiAnalysisThresholdCounter
 import com.diandi.bookkeeping.service.AiAnalysisScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.Instant
-import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
@@ -67,9 +67,11 @@ import java.util.concurrent.TimeUnit
 @Composable
 fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     val context = LocalContext.current
+    val initialCounterState = remember(context) { AiAnalysisThresholdCounter.readState(context) }
 
     var enabled by remember { mutableStateOf(AiAnalysisPrefs.isEnabled(context)) }
-    var dailyTime by remember { mutableStateOf(AiAnalysisPrefs.dailyTime(context)) }
+    var thresholdText by remember { mutableStateOf(initialCounterState.threshold.toString()) }
+    var billCount by remember { mutableIntStateOf(initialCounterState.count) }
     var outputChars by remember { mutableStateOf(AiAnalysisPrefs.maxOutputChars(context).toString()) }
     var analysisText by remember { mutableStateOf(AiAnalysisPrefs.result(context)) }
     var lastSuccessAt by remember { mutableLongStateOf(AiAnalysisPrefs.lastSuccessAt(context)) }
@@ -78,7 +80,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
     var lastError by remember { mutableStateOf(AiAnalysisPrefs.lastError(context)) }
     var enabledModelCount by remember { mutableIntStateOf(AiAnalysisPrefs.enabledCandidates(context).size) }
     var isAnalyzing by remember { mutableStateOf(AiAnalysisPrefs.isAnalyzing(context)) }
-    var dailyWorkStatus by remember { mutableStateOf("正在读取定时任务状态…") }
+    var analysisQueueStatus by remember { mutableStateOf("正在读取分析队列状态…") }
     var autoAnalysisAttempted by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var showModelConfigAction by remember { mutableStateOf(false) }
@@ -91,21 +93,30 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
         lastError = AiAnalysisPrefs.lastError(context)
         enabledModelCount = AiAnalysisPrefs.enabledCandidates(context).size
         isAnalyzing = AiAnalysisPrefs.isAnalyzing(context)
+        val counterState = AiAnalysisThresholdCounter.readState(context)
+        billCount = counterState.count
     }
 
     fun saveSettings(): String? {
-        val parsedTime = runCatching { LocalTime.parse(dailyTime.trim()) }.getOrNull()
+        val parsedThreshold = thresholdText.toIntOrNull()
         val parsedChars = outputChars.toIntOrNull()
         return when {
-            parsedTime == null -> "时间格式无效，请使用 20:00 这样的 HH:mm 格式。"
+            parsedThreshold == null || parsedThreshold !in
+                AiAnalysisThresholdCounter.MIN_THRESHOLD..AiAnalysisThresholdCounter.MAX_THRESHOLD ->
+                "账单触发阈值须为 ${AiAnalysisThresholdCounter.MIN_THRESHOLD}–${AiAnalysisThresholdCounter.MAX_THRESHOLD} 笔。"
             parsedChars == null || parsedChars !in AiAnalysisPrefs.MIN_OUTPUT_CHARS..AiAnalysisPrefs.MAX_OUTPUT_CHARS ->
                 "最大输出字数须为 ${AiAnalysisPrefs.MIN_OUTPUT_CHARS}–${AiAnalysisPrefs.MAX_OUTPUT_CHARS}。"
             else -> {
-                dailyTime = parsedTime.format(DateTimeFormatter.ofPattern("HH:mm"))
-                outputChars = parsedChars.toString()
-                AiAnalysisPrefs.setDailyTime(context, dailyTime)
-                AiAnalysisPrefs.setMaxOutputChars(context, parsedChars)
-                null
+                try {
+                    val counterState = AiAnalysisThresholdCounter.setThreshold(context, parsedThreshold)
+                    thresholdText = counterState.threshold.toString()
+                    billCount = counterState.count
+                    outputChars = parsedChars.toString()
+                    AiAnalysisPrefs.setMaxOutputChars(context, parsedChars)
+                    null
+                } catch (error: Exception) {
+                    "保存账单触发阈值失败：${error.message ?: "未知错误"}"
+                }
             }
         }
     }
@@ -131,26 +142,24 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
 
     LaunchedEffect(enabled, context) {
         if (!enabled) {
-            dailyWorkStatus = "未启用"
+            analysisQueueStatus = "未启用"
             return@LaunchedEffect
         }
-        runCatching { AiAnalysisScheduler.ensureScheduled(context) }
         while (true) {
-            dailyWorkStatus = withContext(Dispatchers.IO) {
+            analysisQueueStatus = withContext(Dispatchers.IO) {
                 runCatching {
                     WorkManager.getInstance(context)
-                        .getWorkInfosForUniqueWork(AiAnalysisScheduler.DAILY_WORK_NAME)
+                        .getWorkInfosForUniqueWork(AiAnalysisScheduler.IMMEDIATE_WORK_NAME)
                         .get(10, TimeUnit.SECONDS)
                 }.fold(
                     onSuccess = { workInfos ->
-                        when (workInfos.firstOrNull()?.state) {
-                            WorkInfo.State.ENQUEUED -> "已排队，等待设定时间、联网或系统调度"
-                            WorkInfo.State.RUNNING -> "正在执行"
-                            WorkInfo.State.BLOCKED -> "等待任务条件满足"
-                            WorkInfo.State.SUCCEEDED -> "最近一次任务已完成"
-                            WorkInfo.State.FAILED -> "任务失败"
-                            WorkInfo.State.CANCELLED -> "任务已取消"
-                            null -> "未找到每日定时任务"
+                        when {
+                            workInfos.any { it.state == WorkInfo.State.RUNNING } -> "正在执行分析"
+                            workInfos.any { it.state == WorkInfo.State.ENQUEUED } -> "已排队，等待联网或系统执行"
+                            workInfos.any { it.state == WorkInfo.State.BLOCKED } -> "等待前序分析完成"
+                            workInfos.any { it.state == WorkInfo.State.FAILED } -> "最近任务执行失败"
+                            workInfos.any { it.state == WorkInfo.State.SUCCEEDED } -> "最近任务已完成"
+                            else -> "当前没有待执行的分析任务"
                         }
                     },
                     onFailure = { error -> "状态读取失败：${error.message ?: "未知错误"}" }
@@ -167,12 +176,16 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
             refreshState()
             enabled = AiAnalysisPrefs.isEnabled(context)
-            dailyTime = AiAnalysisPrefs.dailyTime(context)
             outputChars = AiAnalysisPrefs.maxOutputChars(context).toString()
         }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(receiveContext: android.content.Context?, intent: Intent?) {
                 val update = intent ?: return
+                if (update.action == AiAnalysisThresholdCounter.ACTION_STATE_CHANGED) {
+                    val state = AiAnalysisThresholdCounter.readState(context)
+                    billCount = state.count
+                    return
+                }
                 enabled = update.getBooleanExtra(AiAnalysisPrefs.EXTRA_ENABLED, enabled)
                 analysisText = update.getStringExtra(AiAnalysisPrefs.EXTRA_RESULT) ?: analysisText
                 lastSuccessAt = update.getLongExtra(AiAnalysisPrefs.EXTRA_LAST_SUCCESS_AT, lastSuccessAt)
@@ -188,7 +201,9 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
         ContextCompat.registerReceiver(
             context,
             receiver,
-            IntentFilter(AiAnalysisPrefs.ACTION_STATE_CHANGED),
+            IntentFilter(AiAnalysisPrefs.ACTION_STATE_CHANGED).apply {
+                addAction(AiAnalysisThresholdCounter.ACTION_STATE_CHANGED)
+            },
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
         onDispose {
@@ -232,7 +247,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                         Text("智能消费分析", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         if (enabled) {
                             Text(
-                                "开启后按设定时间分析；没有历史结果时会立即分析一次。",
+                                "开启后按新增账单数触发；没有历史结果时会立即分析一次。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -253,11 +268,10 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                                         showModelConfigAction = false
                                         enabled = true
                                         AiAnalysisPrefs.setEnabled(context, true)
-                                        AiAnalysisScheduler.reschedule(context)
                                         if (AiAnalysisPrefs.result(context).isBlank()) {
                                             runAnalysisNow()
                                         } else {
-                                            message = "已有分析结果，将按每日时间更新。"
+                                            message = "已有分析结果；新增账单累计达到阈值后会自动更新。"
                                         }
                                     }
                                 }
@@ -284,13 +298,20 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                 )
 
                 OutlinedTextField(
-                    value = dailyTime,
-                    onValueChange = { dailyTime = it.take(5) },
+                    value = thresholdText,
+                    onValueChange = { thresholdText = it.filter { char -> char.isDigit() }.take(3) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("每日分析时间（24 小时制 HH:mm）") },
-                    placeholder = { Text(AiAnalysisPrefs.DEFAULT_DAILY_TIME) },
+                    label = { Text("账单触发阈值（笔）") },
+                    supportingText = {
+                        Text("智能分析开启期间，每新增一笔收入或支出计数 +1；达到阈值后触发分析并归零。")
+                    },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                Text(
+                    "当前计数：$billCount / $thresholdText 笔",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedTextField(
                     value = outputChars,
@@ -307,11 +328,8 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                         if (error != null) {
                             message = error
                         } else {
-                            if (enabled) {
-                                AiAnalysisScheduler.reschedule(context)
-                                if (AiAnalysisPrefs.result(context).isBlank()) runAnalysisNow()
-                            }
-                            message = "定时时间和输出字数已保存。"
+                            if (enabled && AiAnalysisPrefs.result(context).isBlank()) runAnalysisNow()
+                            message = "账单触发阈值和输出字数已保存。"
                         }
                     },
                     enabled = !isAnalyzing,
@@ -319,7 +337,7 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                 ) { Text("保存设置") }
 
                 Text(
-                    "每次分析都是独立的新对话；只发送最近 30 天最多 120 笔账单与攒钱目标，包含日期、金额、类目、标签和备注。系统按模型组顺序尝试已启用模型，首个有效回复即停止。账单会发送到你配置的 AI 服务商，请确认其隐私政策与费用。后台执行需要联网，系统省电策略可能使时间稍有延迟。",
+                    "计数以应用私有文件为准，并用文件锁处理主进程与通知进程的并发写入。每次分析都是独立的新对话；只发送最近 30 天最多 120 笔账单与攒钱目标，按模型组顺序尝试已启用模型。账单会发送到你配置的 AI 服务商；触发后需联网，若暂时离线将等待系统运行。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -340,14 +358,14 @@ fun AiAnalysisScreen(onBack: () -> Unit, onOpenModelConfig: () -> Unit) {
                         .format(Instant.ofEpochMilli(lastSuccessAt))
                     Text("最近成功分析：$formatted", style = MaterialTheme.typography.bodySmall)
                 }
-                Text("每日定时任务：$dailyWorkStatus", style = MaterialTheme.typography.bodySmall)
+                Text("分析任务队列：$analysisQueueStatus", style = MaterialTheme.typography.bodySmall)
                 if (lastTriggerAt > 0L) {
                     val formatted = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
                         .withZone(ZoneId.systemDefault())
                         .format(Instant.ofEpochMilli(lastTriggerAt))
                     val sourceLabel = when (lastTriggerSource) {
-                        AiAnalysisScheduler.SOURCE_SCHEDULED -> "每日定时"
                         AiAnalysisScheduler.SOURCE_MANUAL -> "手动"
+                        AiAnalysisScheduler.SOURCE_THRESHOLD -> "账单阈值"
                         else -> "未知来源"
                     }
                     Text("最近实际触发：$formatted（$sourceLabel）", style = MaterialTheme.typography.bodySmall)

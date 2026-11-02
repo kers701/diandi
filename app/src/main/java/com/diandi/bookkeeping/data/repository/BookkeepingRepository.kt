@@ -1,13 +1,17 @@
 package com.diandi.bookkeeping.data.repository
 
+import android.content.Context
 import com.diandi.bookkeeping.data.dao.TransactionDao
 import com.diandi.bookkeeping.data.entity.FundCorrection
 import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.data.entity.Transaction
+import com.diandi.bookkeeping.service.AiAnalysisScheduler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.withContext
 
-class BookkeepingRepository(private val dao: TransactionDao) {
+class BookkeepingRepository(private val dao: TransactionDao, private val context: Context) {
 
     fun getAllTransactions() = dao.getAllTransactions()
 
@@ -22,7 +26,15 @@ class BookkeepingRepository(private val dao: TransactionDao) {
 
     suspend fun countByCategory(category: String) = dao.countByCategory(category)
     suspend fun getTransaction(id: Long) = dao.getById(id)
-    suspend fun addTransaction(tx: Transaction) = dao.insert(tx)
+    suspend fun addTransaction(tx: Transaction): Long {
+        val id = dao.insert(tx)
+        if (id > 0L) {
+            withContext(Dispatchers.IO) {
+                AiAnalysisScheduler.onBillInserted(context.applicationContext)
+            }
+        }
+        return id
+    }
     suspend fun updateTransaction(tx: Transaction) = dao.update(tx)
     suspend fun deleteTransaction(tx: Transaction) = dao.delete(tx)
 

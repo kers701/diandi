@@ -48,7 +48,7 @@ class AutoBillNotificationService : NotificationListenerService() {
         serviceScope.launch {
             try {
                 val now = LocalDate.now()
-                AppDatabase.getInstance(applicationContext).transactionDao().insert(
+                val insertedId = AppDatabase.getInstance(applicationContext).transactionDao().insert(
                     Transaction(
                         amount = parsed.amount,
                         type = parsed.type,
@@ -60,6 +60,7 @@ class AutoBillNotificationService : NotificationListenerService() {
                         day = now.dayOfMonth
                     )
                 )
+                if (insertedId > 0L) AiAnalysisScheduler.onBillInserted(applicationContext)
                 val amountText = if (parsed.amount == parsed.amount.toLong().toDouble()) {
                     parsed.amount.toLong().toString()
                 } else {

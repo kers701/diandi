@@ -10,14 +10,14 @@ import com.diandi.bookkeeping.service.AiAnalysisScheduler
 
 class DiandiApp : Application() {
     val database by lazy { AppDatabase.getInstance(this) }
-    val repository by lazy { BookkeepingRepository(database.transactionDao()) }
+    val repository by lazy { BookkeepingRepository(database.transactionDao(), applicationContext) }
 
     override fun onCreate() {
         super.onCreate()
-        // KeepAliveService and RemoteWorkerService run in :notify and :ai. The default
-        // WorkManager instance is initialized only in the main process.
+        // WorkManager is initialized only in the main process; cancel any old daily
+        // schedule because AI analysis is now triggered by the shared bill counter.
         if (isMainProcess()) {
-            AiAnalysisScheduler.ensureScheduled(this)
+            AiAnalysisScheduler.cancelDailySchedule(this)
         }
     }
 

@@ -4,25 +4,19 @@ import android.content.ComponentName
 import android.content.Context
 import androidx.work.Constraints
 import androidx.work.Data
-import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ListenableWorker
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.multiprocess.RemoteCoroutineWorker
 import androidx.work.multiprocess.RemoteListenableWorker
 import androidx.work.multiprocess.RemoteWorkerService
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
+import com.diandi.bookkeeping.data.ai.AiAnalysisThresholdCounter
 import com.diandi.bookkeeping.data.ai.SmartConsumptionAnalyzer
 import kotlinx.coroutines.CancellationException
-import java.time.Duration
-import java.time.LocalDateTime
-import java.time.LocalTime
-import java.time.ZonedDateTime
-import java.util.concurrent.TimeUnit
 
 class SmartConsumptionAnalysisWorker(
     appContext: Context,
@@ -34,7 +28,7 @@ class SmartConsumptionAnalysisWorker(
         AiAnalysisPrefs.markTriggered(
             context,
             inputData.getString(AiAnalysisScheduler.KEY_TRIGGER_SOURCE)
-                ?: AiAnalysisScheduler.SOURCE_SCHEDULED
+                ?: AiAnalysisScheduler.SOURCE_MANUAL
         )
         return try {
             val success = SmartConsumptionAnalyzer.analyze(context)
@@ -69,31 +63,54 @@ class SmartConsumptionAnalysisWorker(
 
 object AiAnalysisScheduler {
     private const val LEGACY_DAILY_WORK_NAME = "diandi_smart_consumption_analysis_daily"
-    const val DAILY_WORK_NAME = "diandi_smart_consumption_analysis_daily_remote_v2"
+    private const val DAILY_WORK_NAME = "diandi_smart_consumption_analysis_daily_remote_v2"
     const val IMMEDIATE_WORK_NAME = "diandi_smart_consumption_analysis_immediate"
     const val KEY_TRIGGER_SOURCE = "analysis_trigger_source"
-    const val SOURCE_SCHEDULED = "scheduled"
     const val SOURCE_MANUAL = "manual"
+    const val SOURCE_THRESHOLD = "threshold"
 
-    /** 应用启动时使用 KEEP，避免每次打开应用都把下次执行时间往后推。 */
-    fun ensureScheduled(context: Context) = enqueue(context, ExistingPeriodicWorkPolicy.KEEP)
+    /** 应用升级后清理旧版每日定时任务，避免阈值模式与旧定时任务并行。 */
+    fun cancelDailySchedule(context: Context) {
+        val workManager = WorkManager.getInstance(context.applicationContext)
+        workManager.cancelUniqueWork(LEGACY_DAILY_WORK_NAME)
+        workManager.cancelUniqueWork(DAILY_WORK_NAME)
+    }
 
-    /** 用户开启或修改定时时间后，按当前设置重置每日任务。 */
-    fun reschedule(context: Context) = enqueue(context, ExistingPeriodicWorkPolicy.REPLACE)
+    /** 账单成功入库后调用。收入、支出均计数；仅在智能分析启用时累计。 */
+    fun onBillInserted(context: Context) {
+        val appContext = context.applicationContext
+        if (!AiAnalysisPrefs.isEnabled(appContext)) return
+        try {
+            val update = AiAnalysisThresholdCounter.recordNewBill(appContext)
+            if (update.reachedThreshold && !analyzeNow(appContext, SOURCE_THRESHOLD)) {
+                AiAnalysisPrefs.saveError(
+                    appContext,
+                    "新增账单已达到触发阈值，但无法将分析加入后台队列，请打开 AI 分析页查看状态。"
+                )
+            }
+        } catch (e: Exception) {
+            AiAnalysisPrefs.saveError(appContext, "更新账单触发计数失败：${e.message ?: "未知错误"}")
+        }
+    }
 
-    /** 将手动/首次分析也放入独立进程，主界面退出不会取消正在执行的请求。 */
-    fun analyzeNow(context: Context): Boolean {
+    /** 手动、首次或阈值触发的分析都在独立进程执行。阈值触发追加排队，不丢并发周期。 */
+    fun analyzeNow(context: Context, source: String = SOURCE_MANUAL): Boolean {
         val appContext = context.applicationContext
         if (!AiAnalysisPrefs.isEnabled(appContext)) return false
         return try {
-            AiAnalysisPrefs.setAnalyzing(appContext, true)
+            if (source != SOURCE_THRESHOLD) AiAnalysisPrefs.setAnalyzing(appContext, true)
             val request = OneTimeWorkRequestBuilder<SmartConsumptionAnalysisWorker>()
                 .setConstraints(networkConstraints())
-                .setInputData(remoteWorkerData(appContext, SOURCE_MANUAL))
+                .setInputData(remoteWorkerData(appContext, source))
                 .build()
+            val policy = if (source == SOURCE_THRESHOLD) {
+                ExistingWorkPolicy.APPEND_OR_REPLACE
+            } else {
+                ExistingWorkPolicy.KEEP
+            }
             WorkManager.getInstance(appContext).enqueueUniqueWork(
                 IMMEDIATE_WORK_NAME,
-                ExistingWorkPolicy.KEEP,
+                policy,
                 request
             )
             true
@@ -105,29 +122,10 @@ object AiAnalysisScheduler {
     }
 
     fun cancel(context: Context) {
-        val workManager = WorkManager.getInstance(context.applicationContext)
-        workManager.cancelUniqueWork(LEGACY_DAILY_WORK_NAME)
-        workManager.cancelUniqueWork(DAILY_WORK_NAME)
-        workManager.cancelUniqueWork(IMMEDIATE_WORK_NAME)
-        AiAnalysisPrefs.setAnalyzing(context.applicationContext, false)
-    }
-
-    private fun enqueue(context: Context, policy: ExistingPeriodicWorkPolicy) {
         val appContext = context.applicationContext
-        WorkManager.getInstance(appContext).cancelUniqueWork(LEGACY_DAILY_WORK_NAME)
-        if (!AiAnalysisPrefs.isEnabled(appContext)) {
-            cancel(appContext)
-            return
-        }
-        val request = PeriodicWorkRequestBuilder<SmartConsumptionAnalysisWorker>(
-            1, TimeUnit.DAYS, 15, TimeUnit.MINUTES
-        )
-            .setInitialDelay(delayUntilNextRun(AiAnalysisPrefs.dailyTime(appContext)), TimeUnit.MILLISECONDS)
-            .setConstraints(networkConstraints())
-            .setInputData(remoteWorkerData(appContext, SOURCE_SCHEDULED))
-            .build()
-        WorkManager.getInstance(appContext)
-            .enqueueUniquePeriodicWork(DAILY_WORK_NAME, policy, request)
+        cancelDailySchedule(appContext)
+        WorkManager.getInstance(appContext).cancelUniqueWork(IMMEDIATE_WORK_NAME)
+        AiAnalysisPrefs.setAnalyzing(appContext, false)
     }
 
     private fun remoteWorkerData(context: Context, triggerSource: String): Data {
@@ -142,13 +140,4 @@ object AiAnalysisScheduler {
     private fun networkConstraints() = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
         .build()
-
-    private fun delayUntilNextRun(timeText: String): Long {
-        val time = runCatching { LocalTime.parse(timeText) }
-            .getOrDefault(LocalTime.of(20, 0))
-        val now = ZonedDateTime.now()
-        var next = LocalDateTime.of(now.toLocalDate(), time).atZone(now.zone)
-        if (!next.isAfter(now)) next = next.plusDays(1)
-        return Duration.between(now, next).toMillis().coerceAtLeast(0L)
-    }
 }
