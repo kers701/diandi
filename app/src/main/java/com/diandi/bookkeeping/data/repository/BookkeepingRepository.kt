@@ -6,9 +6,11 @@ import com.diandi.bookkeeping.data.entity.FundCorrection
 import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.service.AiAnalysisScheduler
+import com.diandi.bookkeeping.util.TransactionCategories
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 class BookkeepingRepository(private val dao: TransactionDao, private val context: Context) {
@@ -22,7 +24,16 @@ class BookkeepingRepository(private val dao: TransactionDao, private val context
         tagQuery: String = "",
         categories: List<String> = listOf(""),
         categoriesEmpty: Int = 1
-    ) = dao.getFiltered(startDate, endDate, type, tagQuery, categories, categoriesEmpty)
+    ) = dao.getFiltered(startDate, endDate, type, tagQuery, listOf(""), 1).map { transactions ->
+        if (categoriesEmpty == 1 || categories.isEmpty()) {
+            transactions
+        } else {
+            val selected = categories.toSet()
+            transactions.filter { transaction ->
+                TransactionCategories.decode(transaction.category).any { it in selected }
+            }
+        }
+    }
 
     suspend fun countByCategory(category: String) = dao.countByCategory(category)
     suspend fun getTransaction(id: Long) = dao.getById(id)
@@ -58,7 +69,17 @@ class BookkeepingRepository(private val dao: TransactionDao, private val context
     fun getDailyStatsInRange(startDate: String, endDate: String) =
         dao.getDailyStatsInRange(startDate, endDate)
     fun getCategoryDistribution(type: String, year: Int?, month: Int?, day: Int?) =
-        dao.getCategoryDistribution(type, year, month, day)
+        dao.getCategoryDistribution(type, year, month, day).map { rows ->
+            rows.flatMap { row ->
+                val categories = TransactionCategories.decode(row.category).ifEmpty { listOf(row.category) }
+                val amountPerCategory = row.total / categories.size
+                categories.map { category -> category to amountPerCategory }
+            }.groupBy({ it.first }, { it.second })
+                .map { (category, amounts) ->
+                    com.diandi.bookkeeping.data.dao.CategoryStat(category, amounts.sum())
+                }
+                .sortedByDescending { it.total }
+        }
 
     fun getAllGoals() = dao.getAllGoals()
     suspend fun addGoal(goal: SavingsGoal) = dao.insertGoal(goal)

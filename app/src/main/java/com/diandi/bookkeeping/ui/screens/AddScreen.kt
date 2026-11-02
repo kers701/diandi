@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.util.Categories
+import com.diandi.bookkeeping.util.TransactionCategories
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
@@ -30,10 +31,12 @@ fun AddScreen(
     var ready by remember { mutableStateOf(editId == null) }
     var type by remember { mutableStateOf(initialType ?: "EXPENSE") }
     var amountText by remember { mutableStateOf("") }
-    var category by remember {
+    var selectedCategories by remember {
         mutableStateOf(
-            if (initialType == "INCOME") Categories.income(context).first()
-            else Categories.expense(context).first()
+            setOf(
+                if (initialType == "INCOME") Categories.income(context).first()
+                else Categories.expense(context).first()
+            )
         )
     }
     var tags by remember { mutableStateOf("") }
@@ -55,7 +58,7 @@ fun AddScreen(
                 } else {
                     "%.2f".format(tx.amount)
                 }
-                category = tx.category
+                selectedCategories = TransactionCategories.decode(tx.category).toSet()
                 tags = tx.tags
                 note = tx.note
                 date = tx.toLocalDate()
@@ -67,8 +70,8 @@ fun AddScreen(
 
     val categories = Categories.getByType(context, type)
     // 若编辑时类目已不在列表，仍显示当前值
-    val displayCategories = remember(categories, category) {
-        if (category.isNotBlank() && category !in categories) categories + category else categories
+    val displayCategories = remember(categories, selectedCategories) {
+        categories + selectedCategories.filterNot { it in categories }
     }
 
     if (!ready) {
@@ -111,12 +114,12 @@ fun AddScreen(
                 TypeChip("支出", type == "EXPENSE", Color(0xFFD32F2F)) {
                     type = "EXPENSE"
                     val list = Categories.expense(context)
-                    if (category !in list) category = list.first()
+                    selectedCategories = setOf(list.first())
                 }
                 TypeChip("收入", type == "INCOME", Color(0xFF388E3C)) {
                     type = "INCOME"
                     val list = Categories.income(context)
-                    if (category !in list) category = list.first()
+                    selectedCategories = setOf(list.first())
                 }
             }
 
@@ -129,7 +132,7 @@ fun AddScreen(
                 prefix = { Text("¥ ") }
             )
 
-            Text("选择大类", style = MaterialTheme.typography.titleSmall)
+            Text("选择大类（可多选）", style = MaterialTheme.typography.titleSmall)
             displayCategories.chunked(3).forEach { row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -137,8 +140,14 @@ fun AddScreen(
                 ) {
                     row.forEach { cat ->
                         FilterChip(
-                            selected = category == cat,
-                            onClick = { category = cat },
+                            selected = cat in selectedCategories,
+                            onClick = {
+                                selectedCategories = if (cat in selectedCategories) {
+                                    if (selectedCategories.size == 1) selectedCategories else selectedCategories - cat
+                                } else {
+                                    selectedCategories + cat
+                                }
+                            },
                             label = { Text(cat) },
                             modifier = Modifier.weight(1f)
                         )
@@ -185,7 +194,7 @@ fun AddScreen(
                                 id = editId,
                                 amount = amount,
                                 type = type,
-                                category = category,
+                                category = TransactionCategories.encode(selectedCategories),
                                 tags = tags,
                                 note = note,
                                 date = date,
@@ -195,7 +204,7 @@ fun AddScreen(
                             viewModel.addTransaction(
                                 amount = amount,
                                 type = type,
-                                category = category,
+                                category = TransactionCategories.encode(selectedCategories),
                                 tags = tags,
                                 note = note,
                                 date = date

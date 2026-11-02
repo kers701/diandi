@@ -21,6 +21,7 @@ import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.ui.theme.DiandiTheme
 import com.diandi.bookkeeping.util.Categories
+import com.diandi.bookkeeping.util.TransactionCategories
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -88,7 +89,7 @@ private fun QuickAddScreen(
     val context = LocalContext.current
     var type by remember { mutableStateOf("EXPENSE") }
     var amountText by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf(Categories.expense(context).first()) }
+    var selectedCategories by remember { mutableStateOf(setOf(Categories.expense(context).first())) }
     var tags by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     val categories =
@@ -117,11 +118,11 @@ private fun QuickAddScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TypeChip("支出", type == "EXPENSE", Color(0xFFD32F2F)) {
                     type = "EXPENSE"
-                    category = Categories.expense(context).first()
+                    selectedCategories = setOf(Categories.expense(context).first())
                 }
                 TypeChip("收入", type == "INCOME", Color(0xFF388E3C)) {
                     type = "INCOME"
-                    category = Categories.income(context).first()
+                    selectedCategories = setOf(Categories.income(context).first())
                 }
             }
             OutlinedTextField(
@@ -132,13 +133,19 @@ private fun QuickAddScreen(
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
             )
-            Text("大类", style = MaterialTheme.typography.titleSmall)
+            Text("大类（可多选）", style = MaterialTheme.typography.titleSmall)
             categories.chunked(3).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { cat ->
                         FilterChip(
-                            selected = category == cat,
-                            onClick = { category = cat },
+                            selected = cat in selectedCategories,
+                            onClick = {
+                                selectedCategories = if (cat in selectedCategories) {
+                                    if (selectedCategories.size == 1) selectedCategories else selectedCategories - cat
+                                } else {
+                                    selectedCategories + cat
+                                }
+                            },
                             label = { Text(cat) }
                         )
                     }
@@ -161,7 +168,7 @@ private fun QuickAddScreen(
                 onClick = {
                     val amount = amountText.toDoubleOrNull()
                     if (amount != null && amount > 0) {
-                        onSave(amount, type, category, tags.trim(), note.trim())
+                        onSave(amount, type, TransactionCategories.encode(selectedCategories), tags.trim(), note.trim())
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
