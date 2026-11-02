@@ -1,6 +1,7 @@
 package com.diandi.bookkeeping.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -49,9 +50,20 @@ fun ChartsScreen(
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    val monthlyStats by viewModel.monthlyStats.collectAsState()
-    val dailyStats by viewModel.getDailyStats(selectedDate.year, selectedDate.monthValue)
-        .collectAsState(initial = emptyList())
+    val lineStartDate = when (period) {
+        "year" -> LocalDate.of(selectedDate.year, 1, 1)
+        "month" -> selectedDate.withDayOfMonth(1)
+        else -> selectedDate.minusDays(2)
+    }
+    val lineEndDate = when (period) {
+        "year" -> LocalDate.of(selectedDate.year, 12, 31)
+        "month" -> selectedDate.withDayOfMonth(selectedDate.lengthOfMonth())
+        else -> selectedDate
+    }
+    val dailyRangeFlow = remember(viewModel, lineStartDate, lineEndDate) {
+        viewModel.getDailyStatsInRange(lineStartDate.toString(), lineEndDate.toString())
+    }
+    val dailyRangeStats by dailyRangeFlow.collectAsState(initial = emptyList())
     val categoryFlow = viewModel.getCategoryDistribution(
         selectedType,
         if (period != "all") selectedDate.year else null,
@@ -126,88 +138,105 @@ fun ChartsScreen(
 
             when (chartType) {
                 "line" -> {
-                    val linePoints = when (period) {
-                        "year" -> monthlyStats
-                            .groupBy { it.year }
-                            .toSortedMap()
-                            .map { (year, stats) -> year.toString() to stats.sumOf { it.expense }.toFloat() }
-                        "day" -> dailyStats.map {
-                            "${it.month}-${it.day}" to it.expense.toFloat()
-                        }
-                        else -> monthlyStats.map {
-                            "${it.year}-${it.month}" to it.expense.toFloat()
-                        }
+                    val statsByDate = dailyRangeStats.associateBy {
+                        LocalDate.of(it.year, it.month, it.day)
+                    }
+                    val chartDates = generateSequence(lineStartDate) { it.plusDays(1) }
+                        .takeWhile { !it.isAfter(lineEndDate) }
+                        .toList()
+                    val linePoints = chartDates.map { date ->
+                        date to (statsByDate[date]?.expense ?: 0.0).toFloat()
+                    }
+                    val periodDescription = when (period) {
+                        "year" -> "${selectedDate.year}年每日"
+                        "month" -> "${selectedDate.year}年${selectedDate.monthValue}月每日"
+                        else -> "$lineStartDate 至 $lineEndDate 每日"
                     }
                     Text(
-                        "支出趋势（${when (period) { "year" -> "按年"; "day" -> "按日"; else -> "按月" }}汇总）",
+                        "支出趋势（$periodDescription）",
                         style = MaterialTheme.typography.titleMedium
                     )
-                    if (linePoints.isEmpty()) {
-                        Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (dailyRangeStats.none { it.expense > 0.0 }) {
+                        Text("该周期暂无支出数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
-                        val labels = linePoints.map { it.first }
                         val expenses = linePoints.map { it.second }
                         val maxE = (expenses.maxOrNull() ?: 1f).coerceAtLeast(1f)
                         val lineColor = MaterialTheme.colorScheme.primary
                         val labelColor = MaterialTheme.colorScheme.onSurface
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(260.dp)
-                                .padding(vertical = 8.dp)
-                        ) {
-                            val w = size.width
-                            val h = size.height
-                            val topPad = 28f
-                            val bottomPad = 36f
-                            val chartH = h - topPad - bottomPad
-                            val n = expenses.size
-                            val points = expenses.mapIndexed { i, v ->
-                                val x = if (n == 1) w / 2f else i * w / (n - 1)
-                                val y = topPad + chartH - (v / maxE) * chartH * 0.9f
-                                Offset(x, y) to v
-                            }
-                            if (n >= 2) {
-                                val path = Path()
-                                points.forEachIndexed { i, (pt, _) ->
-                                    if (i == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val chartWidth = maxOf(
+                                maxWidth,
+                                24.dp * (linePoints.size - 1).toFloat() + 32.dp
+                            )
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                                Canvas(
+                                    modifier = Modifier
+                                        .width(chartWidth)
+                                        .height(260.dp)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                ) {
+                                    val w = size.width
+                                    val h = size.height
+                                    val topPad = 28f
+                                    val bottomPad = 36f
+                                    val chartH = h - topPad - bottomPad
+                                    val n = expenses.size
+                                    val labelInterval = if (n <= 3) 1 else 5
+                                    val points = expenses.mapIndexed { i, v ->
+                                        val x = if (n == 1) w / 2f else i * w / (n - 1)
+                                        val y = topPad + chartH - (v / maxE) * chartH * 0.9f
+                                        Offset(x, y) to v
+                                    }
+                                    if (n >= 2) {
+                                        val path = Path()
+                                        points.forEachIndexed { i, (pt, _) ->
+                                            if (i == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
+                                        }
+                                        drawPath(path, lineColor, style = Stroke(width = 4f))
+                                    }
+                                    val textPaint = android.graphics.Paint().apply {
+                                        color = android.graphics.Color.argb(
+                                            (labelColor.alpha * 255).toInt(),
+                                            (labelColor.red * 255).toInt(),
+                                            (labelColor.green * 255).toInt(),
+                                            (labelColor.blue * 255).toInt()
+                                        )
+                                        textAlign = android.graphics.Paint.Align.CENTER
+                                        isAntiAlias = true
+                                    }
+                                    points.forEachIndexed { i, (pt, v) ->
+                                        if (i % labelInterval == 0 || i == n - 1) {
+                                            val markerRadius = if (n > 100) 3.5f else 7f
+                                            drawCircle(lineColor, radius = markerRadius, center = pt)
+                                            drawCircle(Color.White, radius = markerRadius / 2f, center = pt)
+                                            if (n <= 3) {
+                                                textPaint.textSize = 28f
+                                                drawContext.canvas.nativeCanvas.drawText(
+                                                    formatShort(v),
+                                                    pt.x,
+                                                    (pt.y - 14f).coerceAtLeast(22f),
+                                                    textPaint
+                                                )
+                                            }
+                                            val date = linePoints[i].first
+                                            textPaint.textSize = 24f
+                                            drawContext.canvas.nativeCanvas.drawText(
+                                                "${date.monthValue}-${date.dayOfMonth}",
+                                                pt.x,
+                                                h - 8f,
+                                                textPaint
+                                            )
+                                        }
+                                    }
                                 }
-                                drawPath(path, lineColor, style = Stroke(width = 4f))
-                            }
-                            val textPaint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.argb(
-                                    (labelColor.alpha * 255).toInt(),
-                                    (labelColor.red * 255).toInt(),
-                                    (labelColor.green * 255).toInt(),
-                                    (labelColor.blue * 255).toInt()
-                                )
-                                textAlign = android.graphics.Paint.Align.CENTER
-                                isAntiAlias = true
-                            }
-                            points.forEachIndexed { i, (pt, v) ->
-                                drawCircle(lineColor, radius = 7f, center = pt)
-                                drawCircle(Color.White, radius = 3.5f, center = pt)
-                                // 数值标注
-                                textPaint.textSize = 28f
-                                drawContext.canvas.nativeCanvas.drawText(
-                                    formatShort(v),
-                                    pt.x,
-                                    (pt.y - 14f).coerceAtLeast(22f),
-                                    textPaint
-                                )
-                                // 月份标签
-                                textPaint.textSize = 24f
-                                drawContext.canvas.nativeCanvas.drawText(
-                                    labels.getOrElse(i) { "" }.takeLast(5),
-                                    pt.x,
-                                    h - 8f,
-                                    textPaint
-                                )
                             }
                         }
+                        val recentPoints = linePoints
+                            .filter { !it.first.isAfter(selectedDate) }
+                            .takeLast(6)
                         Text(
-                            "最近: " + linePoints.takeLast(6).joinToString(" | ") {
-                                "${it.first}: ¥${"%.0f".format(it.second)}"
+                            "最近: " + recentPoints.joinToString(" | ") {
+                                "${it.first.monthValue}-${it.first.dayOfMonth}: ¥${"%.0f".format(it.second)}"
                             },
                             style = MaterialTheme.typography.bodySmall
                         )

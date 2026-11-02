@@ -259,6 +259,8 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         repo.getCategoryDistribution(type, year, month, day)
 
     fun getDailyStats(year: Int, month: Int) = repo.getDailyStats(year, month)
+    fun getDailyStatsInRange(startDate: String, endDate: String) =
+        repo.getDailyStatsInRange(startDate, endDate)
 }
 
 class MainViewModelFactory(private val repo: BookkeepingRepository) : ViewModelProvider.Factory {

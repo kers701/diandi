@@ -112,6 +112,18 @@ interface TransactionDao {
     """)
     fun getDailyStats(year: Int, month: Int): Flow<List<DailyStat>>
 
+    @Query("""
+        SELECT year, month, day,
+               SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END) as expense,
+               SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END) as income
+        FROM transactions
+        WHERE printf('%04d-%02d-%02d', year, month, day) >= :startDate
+          AND printf('%04d-%02d-%02d', year, month, day) <= :endDate
+        GROUP BY year, month, day
+        ORDER BY year, month, day
+    """)
+    fun getDailyStatsInRange(startDate: String, endDate: String): Flow<List<DailyStat>>
+
     // 大类分布
     @Query("""
         SELECT category, SUM(amount) as total

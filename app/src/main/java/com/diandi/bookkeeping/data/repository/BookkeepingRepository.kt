@@ -41,6 +41,8 @@ class BookkeepingRepository(private val dao: TransactionDao) {
 
     fun getMonthlyStats() = dao.getMonthlyStats()
     fun getDailyStats(year: Int, month: Int) = dao.getDailyStats(year, month)
+    fun getDailyStatsInRange(startDate: String, endDate: String) =
+        dao.getDailyStatsInRange(startDate, endDate)
     fun getCategoryDistribution(type: String, year: Int?, month: Int?, day: Int?) =
         dao.getCategoryDistribution(type, year, month, day)
 
