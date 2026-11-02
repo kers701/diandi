@@ -381,7 +381,7 @@ fun HomeScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            "${goal.title}•${(goalProgress * 100).roundToInt()}%",
+                                            "${goal.title}：${(goalProgress * 100).roundToInt()}%",
                                             style = MaterialTheme.typography.labelMedium
                                         )
                                         Text(
