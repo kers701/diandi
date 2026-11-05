@@ -23,7 +23,8 @@ object AppPrefs {
 
     private data class SeenAutoBill(
         val timestamp: Long,
-        val amount: Double,
+        /** 分 */
+        val amountCents: Long,
         val type: String,
         val sourcePackage: String,
         val fingerprint: String
@@ -164,7 +165,7 @@ object AppPrefs {
     fun rememberAutoBillNotification(
         context: Context,
         fingerprint: String,
-        amount: Double,
+        amountCents: Long,
         type: String,
         sourcePackage: String
     ): Boolean {
@@ -177,7 +178,7 @@ object AppPrefs {
                 if (fields.size != 5) return@mapNotNull null
                 SeenAutoBill(
                     timestamp = fields[0].toLongOrNull() ?: return@mapNotNull null,
-                    amount = fields[1].toDoubleOrNull() ?: return@mapNotNull null,
+                    amountCents = fields[1].toLongOrNull() ?: return@mapNotNull null,
                     type = fields[2],
                     sourcePackage = fields[3],
                     fingerprint = fields[4]
@@ -191,16 +192,16 @@ object AppPrefs {
         // 微信支付和银行卡短信可能分别推送同一笔交易，只保留短时间内先到的一条。
         val sameAmountFromAnotherSource = entries.any {
             now - it.timestamp <= DEDUP_WINDOW_MS &&
-                it.amount == amount &&
+                it.amountCents == amountCents &&
                 it.type == type &&
                 it.sourcePackage != sourcePackage
         }
         if (sameAmountFromAnotherSource) return false
 
-        entries += SeenAutoBill(now, amount, type, sourcePackage, fingerprint)
+        entries += SeenAutoBill(now, amountCents, type, sourcePackage, fingerprint)
         file.writeText(
             entries.takeLast(MAX_SEEN).joinToString("\n") {
-                "${it.timestamp}|${it.amount}|${it.type}|${it.sourcePackage}|${it.fingerprint}"
+                "${it.timestamp}|${it.amountCents}|${it.type}|${it.sourcePackage}|${it.fingerprint}"
             }
         )
         return true

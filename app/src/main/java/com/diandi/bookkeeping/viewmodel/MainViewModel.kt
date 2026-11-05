@@ -3,6 +3,7 @@ package com.diandi.bookkeeping.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.diandi.bookkeeping.data.entity.Budget
 import com.diandi.bookkeeping.data.entity.FundCorrection
 import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.data.entity.Transaction
@@ -53,14 +54,21 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val balance: StateFlow<Double> = repo.getBalance()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    /** 余额（分） */
+    val balance: StateFlow<Long> = repo.getBalance()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
-    val totalIncome: StateFlow<Double> = repo.getTotalIncome()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    /** 收入（分） */
+    val totalIncome: StateFlow<Long> = repo.getTotalIncome()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
-    val totalExpense: StateFlow<Double> = repo.getTotalExpense()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    /** 支出（分） */
+    val totalExpense: StateFlow<Long> = repo.getTotalExpense()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    /** 预算列表 */
+    val budgets: StateFlow<List<Budget>> = repo.getAllBudgets()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val goals: StateFlow<List<SavingsGoal>> = repo.getAllGoals()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -92,7 +100,7 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
     }
 
     fun addTransaction(
-        amount: Double,
+        amountCents: Long,
         type: String,
         category: String,
         tags: String,
@@ -102,7 +110,7 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         viewModelScope.launch {
             repo.addTransaction(
                 Transaction(
-                    amount = amount,
+                    amountCents = amountCents,
                     type = type,
                     category = category,
                     tags = tags.trim(),
@@ -117,7 +125,7 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
 
     fun updateTransaction(
         id: Long,
-        amount: Double,
+        amountCents: Long,
         type: String,
         category: String,
         tags: String,
@@ -129,7 +137,7 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
             repo.updateTransaction(
                 Transaction(
                     id = id,
-                    amount = amount,
+                    amountCents = amountCents,
                     type = type,
                     category = category,
                     tags = tags.trim(),
@@ -154,15 +162,16 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
 
     fun addGoal(
         title: String,
-        target: Double,
+        targetCents: Long,
         allocationWeight: Double = 1.0,
         deadline: String = ""
     ) {
+        if (title.isBlank() || targetCents <= 0L) return
         viewModelScope.launch {
             repo.addGoal(
                 SavingsGoal(
-                    title = title,
-                    targetAmount = target,
+                    title = title.trim(),
+                    targetAmountCents = targetCents,
                     allocationWeight = allocationWeight,
                     deadline = deadline
                 )
@@ -173,55 +182,58 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
     fun updateGoalDetails(
         goal: SavingsGoal,
         title: String,
-        targetAmount: Double,
+        targetAmountCents: Long,
         allocationWeight: Double
     ) {
-        if (title.isBlank() || !targetAmount.isFinite() || targetAmount <= 0.0 ||
+        if (title.isBlank() || targetAmountCents <= 0L ||
             !allocationWeight.isFinite() || allocationWeight !in 0.01..1000.0
         ) return
         viewModelScope.launch {
             repo.updateGoal(
                 goal.copy(
                     title = title.trim(),
-                    targetAmount = targetAmount,
+                    targetAmountCents = targetAmountCents,
                     allocationWeight = allocationWeight
                 )
             )
         }
     }
 
-    fun updateGoalProgress(goal: SavingsGoal, addAmount: Double) {
-        if (!addAmount.isFinite() || addAmount <= 0.0) return
+    fun updateGoalProgress(goal: SavingsGoal, addCents: Long) {
+        if (addCents <= 0L) return
         viewModelScope.launch {
             repo.updateGoal(
                 goal.copy(
-                    currentAmount = goal.currentAmount + addAmount,
-                    lastManualDeposit = addAmount
+                    currentAmountCents = goal.currentAmountCents + addCents,
+                    lastManualDepositCents = addCents
                 )
             )
         }
     }
 
     fun undoLastGoalDeposit(goal: SavingsGoal) {
-        val undoAmount = minOf(goal.lastManualDeposit.coerceAtLeast(0.0), goal.currentAmount.coerceAtLeast(0.0))
-        if (undoAmount <= 0.0) return
+        val undo = minOf(
+            goal.lastManualDepositCents.coerceAtLeast(0L),
+            goal.currentAmountCents.coerceAtLeast(0L)
+        )
+        if (undo <= 0L) return
         viewModelScope.launch {
             repo.updateGoal(
                 goal.copy(
-                    currentAmount = (goal.currentAmount - undoAmount).coerceAtLeast(0.0),
-                    lastManualDeposit = 0.0
+                    currentAmountCents = (goal.currentAmountCents - undo).coerceAtLeast(0L),
+                    lastManualDepositCents = 0L
                 )
             )
         }
     }
 
-    fun reduceGoalProgress(goal: SavingsGoal, amount: Double) {
-        if (!amount.isFinite() || amount <= 0.0) return
+    fun reduceGoalProgress(goal: SavingsGoal, amountCents: Long) {
+        if (amountCents <= 0L) return
         viewModelScope.launch {
             repo.updateGoal(
                 goal.copy(
-                    currentAmount = (goal.currentAmount - amount).coerceAtLeast(0.0),
-                    lastManualDeposit = 0.0
+                    currentAmountCents = (goal.currentAmountCents - amountCents).coerceAtLeast(0L),
+                    lastManualDepositCents = 0L
                 )
             )
         }
@@ -229,7 +241,7 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
 
     fun resetGoalProgress(goal: SavingsGoal) {
         viewModelScope.launch {
-            repo.updateGoal(goal.copy(currentAmount = 0.0, lastManualDeposit = 0.0))
+            repo.updateGoal(goal.copy(currentAmountCents = 0L, lastManualDepositCents = 0L))
         }
     }
 
@@ -238,7 +250,7 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
     }
 
     fun addCorrection(
-        amount: Double,
+        amountCents: Long,
         note: String = "",
         date: LocalDate = LocalDate.now(),
         source: String = "手动"
@@ -246,7 +258,7 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         viewModelScope.launch {
             repo.addCorrection(
                 FundCorrection(
-                    amount = amount,
+                    amountCents = amountCents,
                     source = source.trim().ifBlank { "手动" },
                     note = note,
                     year = date.year,
@@ -257,12 +269,11 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
         }
     }
 
-    fun updateCorrection(correction: FundCorrection, amount: Double, source: String, note: String) {
-        if (!amount.isFinite()) return
+    fun updateCorrection(correction: FundCorrection, amountCents: Long, source: String, note: String) {
         viewModelScope.launch {
             repo.updateCorrection(
                 correction.copy(
-                    amount = amount,
+                    amountCents = amountCents,
                     source = source.trim().ifBlank { "手动" },
                     note = note
                 )
@@ -273,6 +284,37 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
     fun deleteCorrection(c: FundCorrection) {
         viewModelScope.launch { repo.deleteCorrection(c) }
     }
+
+    // ========== 预算 ==========
+
+    fun addBudget(scope: String, category: String, monthlyAmountCents: Long) {
+        if (monthlyAmountCents <= 0L) return
+        if (scope == Budget.SCOPE_CATEGORY && category.isBlank()) return
+        viewModelScope.launch {
+            repo.addBudget(
+                Budget(
+                    scope = scope,
+                    category = if (scope == Budget.SCOPE_CATEGORY) category.trim() else "",
+                    monthlyAmountCents = monthlyAmountCents
+                )
+            )
+        }
+    }
+
+    fun updateBudget(budget: Budget, monthlyAmountCents: Long, enabled: Boolean) {
+        if (monthlyAmountCents <= 0L) return
+        viewModelScope.launch {
+            repo.updateBudget(budget.copy(monthlyAmountCents = monthlyAmountCents, enabled = enabled))
+        }
+    }
+
+    fun deleteBudget(budget: Budget) {
+        viewModelScope.launch { repo.deleteBudget(budget) }
+    }
+
+    fun monthExpense(year: Int, month: Int) = repo.getMonthExpense(year, month)
+
+    fun monthExpenseByCategory(year: Int, month: Int) = repo.getMonthExpenseByCategory(year, month)
 
     fun getCategoryDistribution(type: String, year: Int?, month: Int?, day: Int?) =
         repo.getCategoryDistribution(type, year, month, day)

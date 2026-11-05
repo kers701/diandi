@@ -18,6 +18,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.diandi.bookkeeping.data.entity.Transaction
+import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.ui.theme.DiandiTheme
 import com.diandi.bookkeeping.util.Categories
@@ -37,13 +38,13 @@ class QuickAddActivity : ComponentActivity() {
             DiandiTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     QuickAddScreen(
-                        onSave = { amount, type, category, tags, note ->
+                        onSave = { amountCents, type, category, tags, note ->
                             lifecycleScope.launch {
                                 withContext(Dispatchers.IO) {
                                     val d = LocalDate.now()
                                     app.repository.addTransaction(
                                         Transaction(
-                                            amount = amount,
+                                            amountCents = amountCents,
                                             type = type,
                                             category = category,
                                             tags = tags,
@@ -83,7 +84,7 @@ class QuickAddActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QuickAddScreen(
-    onSave: (amount: Double, type: String, category: String, tags: String, note: String) -> Unit,
+    onSave: (amountCents: Long, type: String, category: String, tags: String, note: String) -> Unit,
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
@@ -166,13 +167,13 @@ private fun QuickAddScreen(
             )
             Button(
                 onClick = {
-                    val amount = amountText.toDoubleOrNull()
-                    if (amount != null && amount > 0) {
-                        onSave(amount, type, TransactionCategories.encode(selectedCategories), tags.trim(), note.trim())
+                    val amountCents = Money.parseToCents(amountText)
+                    if (amountCents != null && amountCents > 0L) {
+                        onSave(amountCents, type, TransactionCategories.encode(selectedCategories), tags.trim(), note.trim())
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = amountText.toDoubleOrNull()?.let { it > 0 } == true
+                enabled = Money.parseToCents(amountText)?.let { it > 0L } == true
             ) {
                 Text("保存并关闭")
             }

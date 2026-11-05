@@ -11,19 +11,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.text.NumberFormat
-import java.util.Locale
+import com.diandi.bookkeeping.util.Money
 
-fun formatMoney(amount: Double): String {
-    val nf = NumberFormat.getCurrencyInstance(Locale.CHINA)
-    return nf.format(amount)
-}
+/** 金额统一以「分」传入，展示为 ¥12.34（不带 CNY 前缀，保持与旧版观感一致） */
+fun formatMoney(cents: Long): String = "¥" + Money.format(cents)
 
 @Composable
 fun BalanceCard(
-    balance: Double,
-    income: Double,
-    expense: Double,
+    balanceCents: Long,
+    incomeCents: Long,
+    expenseCents: Long,
     summaryPeriodLabel: String = "",
     modifier: Modifier = Modifier,
     accentColor: Color = MaterialTheme.colorScheme.primary
@@ -40,7 +37,7 @@ fun BalanceCard(
             Text("当前余额", color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp)
             Spacer(Modifier.height(4.dp))
             Text(
-                formatMoney(balance),
+                formatMoney(balanceCents),
                 color = Color.White,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold
@@ -57,7 +54,7 @@ fun BalanceCard(
                         fontSize = 12.sp
                     )
                     Text(
-                        formatMoney(income),
+                        formatMoney(incomeCents),
                         color = Color.White,
                         fontWeight = FontWeight.Medium
                     )
@@ -69,7 +66,7 @@ fun BalanceCard(
                         fontSize = 12.sp
                     )
                     Text(
-                        formatMoney(expense),
+                        formatMoney(expenseCents),
                         color = Color.White,
                         fontWeight = FontWeight.Medium
                     )

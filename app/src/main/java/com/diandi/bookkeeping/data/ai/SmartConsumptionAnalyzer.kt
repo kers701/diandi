@@ -4,6 +4,7 @@ import android.content.Context
 import com.diandi.bookkeeping.data.db.AppDatabase
 import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.data.entity.Transaction
+import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.util.allocateBalanceByWeight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -57,8 +58,8 @@ object SmartConsumptionAnalyzer {
             return false
         }
         val goals = dao.getGoalsForBackup()
-        val currentBalance = dao.getCurrentLedgerBalance()
-        val userContent = buildUserContent(startDate, today, transactions, goals, currentBalance)
+        val currentBalanceCents = dao.getCurrentLedgerBalance()
+        val userContent = buildUserContent(startDate, today, transactions, goals, currentBalanceCents)
         val maxChars = AiAnalysisPrefs.maxOutputChars(context)
         val systemContent = "你是个人记账应用中的消费行为分析助手。只依据用户提供的账单、当前账本总余额与攒钱目标做客观分析，不臆测缺失信息，不提供投资或借贷建议。回复请使用简体中文，最多 $maxChars 个汉字，控制在 3 至 5 条要点：指出消费结构或趋势、给出具体可执行的节流建议；若提供了攒钱目标，再给出与目标相关的储蓄建议。务必区分全账本净余额、按权重分配给每个目标的余额和目标手动记录金额；分析目标进度时使用输入中标明的合计显示进度，不能因手动记录为0就判断该目标没有余额分配。不要复述全部流水，不要追问，不使用表格。"
         val failures = mutableListOf<String>()
@@ -126,12 +127,12 @@ object SmartConsumptionAnalyzer {
         endDate: LocalDate,
         transactions: List<Transaction>,
         goals: List<SavingsGoal>,
-        currentBalance: Double
+        currentBalanceCents: Long
     ): String {
         val bills = buildString {
             transactions.forEach { tx ->
                 val typeText = if (tx.type == "INCOME") "收入" else "支出"
-                val amount = String.format(Locale.US, "%.2f", tx.amount)
+                val amount = Money.toYuanString(tx.amountCents)
                 val tags = tx.tags.compact(40)
                 val note = tx.note.compact(60)
                 append(tx.toLocalDate())
@@ -145,25 +146,25 @@ object SmartConsumptionAnalyzer {
         }
         val goalText = buildString {
             appendLine("攒钱目标：")
-            val allocations = allocateBalanceByWeight(currentBalance, goals)
+            val allocations = allocateBalanceByWeight(currentBalanceCents, goals)
             if (goals.isEmpty()) {
                 appendLine("暂无攒钱目标。")
             } else {
                 goals.take(20).forEach { goal ->
-                    val allocated = allocations[goal.id] ?: 0.0
-                    val displayed = goal.currentAmount + allocated
+                    val allocated = allocations[goal.id] ?: 0L
+                    val displayed = goal.currentAmountCents + allocated
                     append("- ").append(goal.title.compact(60))
-                        .append("：手动记录 ¥").append(String.format(Locale.US, "%.2f", goal.currentAmount))
+                        .append("：手动记录 ¥").append(Money.toYuanString(goal.currentAmountCents))
                         .append("；权重 ").append(String.format(Locale.US, "%.2f", goal.allocationWeight))
-                        .append(" 分配账本余额 ¥").append(String.format(Locale.US, "%.2f", allocated))
-                        .append("；合计显示进度 ¥").append(String.format(Locale.US, "%.2f", displayed))
-                        .append(" / 目标 ¥").append(String.format(Locale.US, "%.2f", goal.targetAmount))
+                        .append(" 分配账本余额 ¥").append(Money.toYuanString(allocated))
+                        .append("；合计显示进度 ¥").append(Money.toYuanString(displayed))
+                        .append(" / 目标 ¥").append(Money.toYuanString(goal.targetAmountCents))
                     if (goal.deadline.isNotBlank()) append("，截止 ").append(goal.deadline.compact(20))
                     appendLine()
                 }
             }
         }
-        val balanceText = String.format(Locale.US, "%.2f", currentBalance)
+        val balanceText = Money.toYuanString(currentBalanceCents)
         val heading = "分析区间：$startDate 至 $endDate（近 30 天）。账单摘要最多 ${transactions.size} 笔，按时间倒序，超长内容会截断。\n提示：账单明细可能仅为分析区间内的部分记录，不保证覆盖全部账单。必须根据实际提供的数据判断完整性；若账单不完整，只能分析已提供记录中的消费特征，不得将样本结论描述为整个分析区间的完整统计结果，不得推算未提供账单的金额、占比或消费行为。只有输入明确提供完整统计数据时，才可以对整体消费结构和趋势作出结论。\n当前账本总余额（全部资金修正 + 累计收入 - 累计支出）：¥$balanceText。这是全账本净余额，与下列每个攒钱目标单独记录的当前金额不同。\n"
         val ending = "\n请仅给出简短的消费分析与建议，不需要逐条复述账单。"
         val billsBudget = (MAX_INPUT_CHARS - heading.length - goalText.length - ending.length - 1)
