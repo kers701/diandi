@@ -61,6 +61,8 @@ import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.AppUpdateChecker
 import com.diandi.bookkeeping.util.AppPrefs
 import com.diandi.bookkeeping.util.BillingCycleCalculator
+import com.diandi.bookkeeping.util.BudgetMath
+import com.diandi.bookkeeping.util.BudgetOverview
 import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.util.allocateBalanceByWeight
 import androidx.compose.ui.platform.LocalContext
@@ -114,15 +116,18 @@ fun HomeScreen(
 
     // 本周期预算（周期开始日可在预算页设置，默认 1 号）
     val budgets by viewModel.budgets.collectAsState()
-    val totalBudget = remember(budgets) {
-        budgets.firstOrNull { it.scope == Budget.SCOPE_TOTAL && it.enabled }
-    }
     val budgetCycle = remember {
         BillingCycleCalculator.of(LocalDate.now(), AppPrefs.getBudgetCycleStartDay(context))
     }
     val cycleExpense by remember(budgetCycle) {
         viewModel.expenseInRange(budgetCycle.startDate, budgetCycle.endDate)
     }.collectAsState(initial = 0L)
+    val cycleByCategory by remember(budgetCycle) {
+        viewModel.expenseByCategoryInRange(budgetCycle.startDate, budgetCycle.endDate)
+    }.collectAsState(initial = emptyMap())
+    val budgetOverview = remember(budgets, balance, cycleByCategory, cycleExpense) {
+        BudgetMath.overview(balance, budgets, cycleByCategory, cycleExpense)
+    }
     val totalsPeriodLabel = when (homeTotalsPeriod) {
         AppPrefs.HOME_TOTALS_TODAY -> "本日"
         AppPrefs.HOME_TOTALS_MONTH -> "本月"
@@ -370,8 +375,7 @@ fun HomeScreen(
                 // 本月预算：设置过就显示进度，没设置给个入口
                 Spacer(Modifier.height(8.dp))
                 BudgetSummaryCard(
-                    budgetCents = totalBudget?.monthlyAmountCents,
-                    spentCents = cycleExpense,
+                    overview = budgetOverview,
                     cycleLabel = budgetCycle.label,
                     onClick = onBudgetClick
                 )
@@ -931,24 +935,18 @@ private fun HomeCategoryChart(
 }
 
 
-/** 首页预算摘要：未设置时是一个轻量入口，设置后显示本月剩余/超支 */
+/** 首页预算摘要：显示「可自由分配余额」= 余额 − 固定预留 − 浮动预留 */
 @Composable
 private fun BudgetSummaryCard(
-    budgetCents: Long?,
-    spentCents: Long,
+    overview: BudgetOverview,
     cycleLabel: String,
     onClick: () -> Unit
 ) {
-    val configured = budgetCents != null && budgetCents > 0L
-    val progress = if (configured) {
-        Money.ratio(spentCents, budgetCents!!).toFloat().coerceIn(0f, 1f)
-    } else 0f
-    val remaining = (budgetCents ?: 0L) - spentCents
-    val over = configured && remaining < 0L
-    val warn = configured && !over && progress >= 0.8f
+    val configured = overview.hasFixed || overview.hasFloating
+    val free = overview.freeCents
     val accent = when {
-        over -> MaterialTheme.colorScheme.error
-        warn -> MaterialTheme.colorScheme.tertiary
+        free < 0L -> MaterialTheme.colorScheme.error
+        !configured -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.primary
     }
     Card(
@@ -961,36 +959,29 @@ private fun BudgetSummaryCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("本周期预算", style = MaterialTheme.typography.titleSmall)
+                Text("可自由分配", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    if (configured) {
-                        "${formatMoney(spentCents)} / ${formatMoney(budgetCents!!)}"
-                    } else {
-                        "点击设置 →"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = accent
+                    if (configured) "本周期 $cycleLabel" else "点击设置预算 →",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             if (configured) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth(),
+                Text(
+                    formatMoney(free),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
                     color = accent
                 )
                 Text(
-                    when {
-                        over -> "已超支 ${formatMoney(-remaining)}"
-                        warn -> "快用完了，还剩 ${formatMoney(remaining)}"
-                        else -> "还剩 ${formatMoney(remaining)}"
-                    },
+                    "余额 ${formatMoney(overview.balanceCents)} − 固定预留 ${formatMoney(overview.fixedReservedCents)}" +
+                        " − 浮动预留 ${formatMoney(overview.floatingReservedCents)}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (over) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
                 Text(
-                    "给本周期（$cycleLabel）设个上限，首页就能随时看到还能花多少",
+                    "先设固定开销（房租水电）和浮动预算，这里就显示可自由分配的钱",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
