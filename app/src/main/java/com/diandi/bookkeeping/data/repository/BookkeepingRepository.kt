@@ -102,6 +102,19 @@ class BookkeepingRepository(private val dao: TransactionDao, private val context
     fun getMonthExpenseByCategory(year: Int, month: Int): Flow<Map<String, Long>> =
         dao.getMonthExpenseByCategory(year, month).map { rows -> splitCombinedCategories(rows) }
 
+    /** 资金周期（可能跨月）内的支出合计（分） */
+    fun getExpenseInRange(startDate: String, endDate: String): Flow<Long> =
+        dao.getExpenseInRange(startDate, endDate)
+
+    /** 资金周期内按大类汇总的支出（分），组合类目已拆分 */
+    fun getExpenseByCategoryInRange(startDate: String, endDate: String): Flow<Map<String, Long>> =
+        dao.getExpenseByCategoryInRange(startDate, endDate).map { rows -> splitCombinedCategories(rows) }
+
+    suspend fun addBudgets(items: List<Budget>) {
+        if (items.isEmpty()) return
+        dao.insertBudgets(items)
+    }
+
     /**
      * 把「餐饮 + 交通」这类组合类目的金额拆到单个类目上。
      * 除不尽的分按顺序补给前几个类目，保证拆完之后总额与原金额完全一致。

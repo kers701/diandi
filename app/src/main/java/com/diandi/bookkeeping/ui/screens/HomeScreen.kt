@@ -60,6 +60,7 @@ import com.diandi.bookkeeping.viewmodel.MainViewModel
 import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.AppUpdateChecker
 import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.util.BillingCycleCalculator
 import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.util.allocateBalanceByWeight
 import androidx.compose.ui.platform.LocalContext
@@ -111,14 +112,16 @@ fun HomeScreen(
     val income = totals.income
     val expense = totals.expense
 
-    // 本月预算
+    // 本周期预算（周期开始日可在预算页设置，默认 1 号）
     val budgets by viewModel.budgets.collectAsState()
     val totalBudget = remember(budgets) {
         budgets.firstOrNull { it.scope == Budget.SCOPE_TOTAL && it.enabled }
     }
-    val budgetMonth = remember { LocalDate.now() }
-    val monthExpense by remember(budgetMonth.year, budgetMonth.monthValue) {
-        viewModel.monthExpense(budgetMonth.year, budgetMonth.monthValue)
+    val budgetCycle = remember {
+        BillingCycleCalculator.of(LocalDate.now(), AppPrefs.getBudgetCycleStartDay(context))
+    }
+    val cycleExpense by remember(budgetCycle) {
+        viewModel.expenseInRange(budgetCycle.startDate, budgetCycle.endDate)
     }.collectAsState(initial = 0L)
     val totalsPeriodLabel = when (homeTotalsPeriod) {
         AppPrefs.HOME_TOTALS_TODAY -> "本日"
@@ -368,7 +371,8 @@ fun HomeScreen(
                 Spacer(Modifier.height(8.dp))
                 BudgetSummaryCard(
                     budgetCents = totalBudget?.monthlyAmountCents,
-                    spentCents = monthExpense,
+                    spentCents = cycleExpense,
+                    cycleLabel = budgetCycle.label,
                     onClick = onBudgetClick
                 )
 
@@ -932,6 +936,7 @@ private fun HomeCategoryChart(
 private fun BudgetSummaryCard(
     budgetCents: Long?,
     spentCents: Long,
+    cycleLabel: String,
     onClick: () -> Unit
 ) {
     val configured = budgetCents != null && budgetCents > 0L
@@ -956,7 +961,7 @@ private fun BudgetSummaryCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("本月预算", style = MaterialTheme.typography.titleSmall)
+                Text("本周期预算", style = MaterialTheme.typography.titleSmall)
                 Text(
                     if (configured) {
                         "${formatMoney(spentCents)} / ${formatMoney(budgetCents!!)}"
@@ -985,7 +990,7 @@ private fun BudgetSummaryCard(
                 )
             } else {
                 Text(
-                    "给本月设个上限，首页就能随时看到还能花多少",
+                    "给本周期（$cycleLabel）设个上限，首页就能随时看到还能花多少",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

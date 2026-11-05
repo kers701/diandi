@@ -196,6 +196,25 @@ interface TransactionDao {
     """)
     fun getMonthExpenseByCategory(year: Int, month: Int): Flow<List<CategoryStat>>
 
+    /** 指定日期区间内的支出合计（分）——资金周期可能是跨月的 */
+    @Query("""
+        SELECT COALESCE(SUM(amount), 0) FROM transactions
+        WHERE type = 'EXPENSE'
+          AND printf('%04d-%02d-%02d', year, month, day) >= :startDate
+          AND printf('%04d-%02d-%02d', year, month, day) <= :endDate
+    """)
+    fun getExpenseInRange(startDate: String, endDate: String): Flow<Long>
+
+    /** 指定日期区间内按大类汇总的支出（分） */
+    @Query("""
+        SELECT category, SUM(amount) as total FROM transactions
+        WHERE type = 'EXPENSE'
+          AND printf('%04d-%02d-%02d', year, month, day) >= :startDate
+          AND printf('%04d-%02d-%02d', year, month, day) <= :endDate
+        GROUP BY category
+    """)
+    fun getExpenseByCategoryInRange(startDate: String, endDate: String): Flow<List<CategoryStat>>
+
     // ========== 攒钱目标 ==========
     @Query("SELECT * FROM savings_goals ORDER BY createdAt DESC")
     fun getAllGoals(): Flow<List<SavingsGoal>>

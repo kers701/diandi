@@ -1,8 +1,6 @@
 package com.diandi.bookkeeping.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -34,12 +33,14 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -49,19 +50,26 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import com.diandi.bookkeeping.data.entity.Budget
 import com.diandi.bookkeeping.ui.components.formatMoney
 import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.util.BillingCycle
+import com.diandi.bookkeeping.util.BillingCycleCalculator
 import com.diandi.bookkeeping.util.Money
+import com.diandi.bookkeeping.util.SmartBudget
 import com.diandi.bookkeeping.util.TransactionCategories
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import java.time.LocalDate
+import kotlin.math.roundToInt
 
 /**
- * 预算：每月总预算 + 按大类预算，显示本月已用与超支情况。
+ * 预算页。
  *
- * 已用金额来自本月支出；分类预算的类目可以是多选组合（如「餐饮 + 交通」），
- * 组合内的类目支出相加即为该预算的已用金额。
+ * - 资金月周期可自定义开始日（默认 1 号），因为发薪日通常不是 1 号；
+ *   所以这里所有"本月"统计都按 [BillingCycle] 的日期区间查，不按自然月。
+ * - 智能预算：用上一个周期的实际分类支出，一键生成还没预算的大类预算；
+ *   上个周期没有数据时提示"正在收集数据"。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,20 +79,35 @@ fun BudgetScreen(
 ) {
     val context = LocalContext.current
     val today = remember { LocalDate.now() }
+    var cycleStartDay by remember {
+        mutableIntStateOf(AppPrefs.getBudgetCycleStartDay(context))
+    }
+    val cycle = remember(today, cycleStartDay) {
+        BillingCycleCalculator.of(today, cycleStartDay)
+    }
+    val previousCycle = remember(today, cycleStartDay) {
+        BillingCycleCalculator.previous(today, cycleStartDay)
+    }
+
     val budgets by viewModel.budgets.collectAsState()
-    val monthExpense by remember(today.year, today.monthValue) {
-        viewModel.monthExpense(today.year, today.monthValue)
+    val cycleExpense by remember(cycle) {
+        viewModel.expenseInRange(cycle.startDate, cycle.endDate)
     }.collectAsState(initial = 0L)
-    val expenseByCategory by remember(today.year, today.monthValue) {
-        viewModel.monthExpenseByCategory(today.year, today.monthValue)
+    val cycleByCategory by remember(cycle) {
+        viewModel.expenseByCategoryInRange(cycle.startDate, cycle.endDate)
+    }.collectAsState(initial = emptyMap())
+    val previousByCategory by remember(previousCycle) {
+        viewModel.expenseByCategoryInRange(previousCycle.startDate, previousCycle.endDate)
     }.collectAsState(initial = emptyMap())
 
     var showEditDialog by remember { mutableStateOf(false) }
     var editingBudget by remember { mutableStateOf<Budget?>(null) }
     var budgetToDelete by remember { mutableStateOf<Budget?>(null) }
+    var showCycleDialog by remember { mutableStateOf(false) }
 
     val totalBudget = budgets.firstOrNull { it.scope == Budget.SCOPE_TOTAL }
     val categoryBudgets = budgets.filter { it.scope == Budget.SCOPE_CATEGORY }
+    val previousTotal = previousByCategory.values.sum()
 
     Scaffold(
         topBar = {
@@ -93,6 +116,11 @@ fun BudgetScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showCycleDialog = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "周期设置")
                     }
                 }
             )
@@ -113,18 +141,76 @@ fun BudgetScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item { Spacer(Modifier.height(4.dp)) }
+            item { Spacer(Modifier.height(2.dp)) }
+
+            item {
+                CycleCard(
+                    cycle = cycle,
+                    startDay = cycleStartDay,
+                    onEditCycle = { showCycleDialog = true }
+                )
+            }
 
             item {
                 TotalBudgetCard(
                     budget = totalBudget,
-                    spentCents = monthExpense,
-                    monthLabel = "${today.year}年${today.monthValue}月",
+                    spentCents = cycleExpense,
+                    cycleLabel = cycle.label,
                     onEdit = {
                         editingBudget = totalBudget
                         showEditDialog = true
                     },
                     onDelete = { totalBudget?.let { budgetToDelete = it } }
+                )
+            }
+
+            item {
+                SmartBudgetCard(
+                    previousLabel = previousCycle.label,
+                    previousTotalCents = previousTotal,
+                    hasPreviousData = previousByCategory.isNotEmpty(),
+                    suggestionCount = SmartBudget.suggest(
+                        previousByCategory,
+                        categoryBudgets.map { it.category }.toSet()
+                    ).size,
+                    onGenerate = {
+                        val suggestions = SmartBudget.suggest(
+                            previousByCategory,
+                            categoryBudgets.map { it.category }.toSet()
+                        )
+                        when {
+                            previousByCategory.isEmpty() -> {
+                                Toast.makeText(
+                                    context,
+                                    "正在收集数据：上个周期还没有支出记录，下个周期起即可自动生成",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            suggestions.isEmpty() -> {
+                                Toast.makeText(
+                                    context,
+                                    "上个周期的支出分类都已经有预算了",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            else -> {
+                                viewModel.addBudgets(
+                                    suggestions.map {
+                                        Budget(
+                                            scope = Budget.SCOPE_CATEGORY,
+                                            category = it.category,
+                                            monthlyAmountCents = it.amountCents
+                                        )
+                                    }
+                                )
+                                Toast.makeText(
+                                    context,
+                                    "已按上个周期生成 ${suggestions.size} 条预算",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
                 )
             }
 
@@ -146,7 +232,7 @@ fun BudgetScreen(
             if (categoryBudgets.isEmpty()) {
                 item {
                     Text(
-                        "还没有分类预算。点右下角 + 可以给某个大类单独设上限，比如「餐饮 1500」。",
+                        "还没有分类预算。点右下角 + 单条添加，或用上面的智能预算按上个周期自动生成。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -155,7 +241,7 @@ fun BudgetScreen(
                 items(categoryBudgets, key = { it.id }) { budget ->
                     CategoryBudgetCard(
                         budget = budget,
-                        spentCents = spentForBudget(budget, expenseByCategory),
+                        spentCents = spentForBudget(budget, cycleByCategory),
                         onClick = {
                             editingBudget = budget
                             showEditDialog = true
@@ -166,7 +252,8 @@ fun BudgetScreen(
 
             item {
                 Text(
-                    "提示：预算只做提示，不会阻止记账。已用金额按本月支出实时统计。",
+                    "提示：预算只做提示，不会阻止记账。已用金额按当前资金周期实时统计；" +
+                        "周期开始日可在右上角修改，修改后本页统计立即按新周期计算。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -179,6 +266,9 @@ fun BudgetScreen(
         BudgetEditDialog(
             budget = editingBudget,
             categories = remember { AppPrefs.getExpenseCategories(context) },
+            lastCycleSpend = previousByCategory,
+            lastCycleTotalCents = previousTotal,
+            lastCycleLabel = previousCycle.label,
             onDismiss = { showEditDialog = false },
             onConfirm = { budget, amountCents, category, categoryScope ->
                 if (budget == null) {
@@ -202,13 +292,27 @@ fun BudgetScreen(
         )
     }
 
+    if (showCycleDialog) {
+        CycleSettingsDialog(
+            currentDay = cycleStartDay,
+            cycle = cycle,
+            onDismiss = { showCycleDialog = false },
+            onConfirm = { day ->
+                val clamped = BillingCycleCalculator.clampStartDay(day)
+                cycleStartDay = clamped
+                AppPrefs.setBudgetCycleStartDay(context, clamped)
+                showCycleDialog = false
+            }
+        )
+    }
+
     budgetToDelete?.let { budget ->
         AlertDialog(
             onDismissRequest = { budgetToDelete = null },
             title = { Text("删除预算？") },
             text = {
                 Text(
-                    if (budget.scope == Budget.SCOPE_TOTAL) "将删除本月总预算。"
+                    if (budget.scope == Budget.SCOPE_TOTAL) "将删除总预算。"
                     else "将删除「${budget.category}」的分类预算。"
                 )
             },
@@ -225,7 +329,7 @@ fun BudgetScreen(
     }
 }
 
-/** 某条预算本月已用金额（分） */
+/** 某条预算在当前周期内的已用金额（分） */
 private fun spentForBudget(budget: Budget, expenseByCategory: Map<String, Long>): Long {
     if (budget.scope == Budget.SCOPE_TOTAL) return expenseByCategory.values.sum()
     val categories = TransactionCategories.decode(budget.category)
@@ -233,10 +337,83 @@ private fun spentForBudget(budget: Budget, expenseByCategory: Map<String, Long>)
 }
 
 @Composable
+private fun CycleCard(
+    cycle: BillingCycle,
+    startDay: Int,
+    onEditCycle: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("本资金周期", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "${cycle.start.year}年 ${cycle.label}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = onEditCycle) { Text("每月${startDay}号起") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmartBudgetCard(
+    previousLabel: String,
+    previousTotalCents: Long,
+    hasPreviousData: Boolean,
+    suggestionCount: Int,
+    onGenerate: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f)
+        )
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("智能预算", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            if (!hasPreviousData) {
+                Text(
+                    "正在收集数据：上个周期（$previousLabel）还没有支出记录，" +
+                        "有了数据后就能按实际支出自动生成预算。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    "上个周期（$previousLabel）共支出 ${formatMoney(previousTotalCents)}，" +
+                        "其中还有 $suggestionCount 个分类没有预算。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "房租、水电、话费这类固定支出，直接按上个周期实际金额生成，省得每月手填。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(
+                onClick = onGenerate,
+                enabled = hasPreviousData && suggestionCount > 0
+            ) {
+                Text(if (!hasPreviousData) "正在收集数据…" else "按上个周期生成预算")
+            }
+        }
+    }
+}
+
+@Composable
 private fun TotalBudgetCard(
     budget: Budget?,
     spentCents: Long,
-    monthLabel: String,
+    cycleLabel: String,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -262,7 +439,7 @@ private fun TotalBudgetCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("$monthLabel 总预算", style = MaterialTheme.typography.titleSmall)
+                Text("总预算（$cycleLabel）", style = MaterialTheme.typography.titleSmall)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onEdit) { Text(if (budget == null) "设置" else "修改") }
                     if (budget != null) {
@@ -278,7 +455,7 @@ private fun TotalBudgetCard(
             }
             if (budget == null) {
                 Text(
-                    "还没有设置本月总预算。设置后首页会显示本月还能花多少。",
+                    "还没有设置总预算。设置后首页会显示本周期还能花多少。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -360,6 +537,9 @@ private fun CategoryBudgetCard(
 private fun BudgetEditDialog(
     budget: Budget?,
     categories: List<String>,
+    lastCycleSpend: Map<String, Long>,
+    lastCycleTotalCents: Long,
+    lastCycleLabel: String,
     onDismiss: () -> Unit,
     onConfirm: (Budget?, Long, String, Boolean) -> Unit
 ) {
@@ -376,6 +556,13 @@ private fun BudgetEditDialog(
     }
     var invalid by remember(budget?.id) { mutableStateOf(false) }
 
+    // 参考上个周期：分类模式按选中的类目求和，总预算模式用上个周期总支出
+    val referenceCents = if (isCategoryScope) {
+        SmartBudget.referenceAmount(lastCycleSpend, selected)
+    } else {
+        lastCycleTotalCents.takeIf { it > 0L }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (budget == null) "新建预算" else "修改预算") },
@@ -388,7 +575,7 @@ private fun BudgetEditDialog(
                     FilterChip(
                         selected = !isCategoryScope,
                         onClick = { isCategoryScope = false },
-                        label = { Text("本月总共") }
+                        label = { Text("总预算") }
                     )
                     FilterChip(
                         selected = isCategoryScope,
@@ -399,11 +586,22 @@ private fun BudgetEditDialog(
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' }.take(12) },
-                    label = { Text("每月预算金额") },
+                    label = { Text("每周期预算金额") },
                     singleLine = true,
                     prefix = { Text("¥ ") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                 )
+                if (referenceCents != null) {
+                    TextButton(onClick = { amountText = Money.toInputText(referenceCents) }) {
+                        Text("填入上个周期实际支出 ${formatMoney(referenceCents)}")
+                    }
+                } else {
+                    Text(
+                        "正在收集数据：上个周期（$lastCycleLabel）没有可参考的支出",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 if (isCategoryScope) {
                     Text("选择大类（可多选，合并计算）", style = MaterialTheme.typography.bodySmall)
                     if (categories.isEmpty()) {
@@ -429,7 +627,9 @@ private fun BudgetEditDialog(
                                         AssistChipDefaults.assistChipColors(
                                             containerColor = MaterialTheme.colorScheme.primaryContainer
                                         )
-                                    } else AssistantChipColorsDefault()
+                                    } else {
+                                        AssistChipDefaults.assistChipColors()
+                                    }
                                 )
                             }
                         }
@@ -447,9 +647,7 @@ private fun BudgetEditDialog(
         confirmButton = {
             TextButton(onClick = {
                 val cents = Money.parseToCents(amountText)
-                val category = if (isCategoryScope) {
-                    TransactionCategories.encode(selected)
-                } else ""
+                val category = if (isCategoryScope) TransactionCategories.encode(selected) else ""
                 if (cents != null && cents > 0L && (!isCategoryScope || selected.isNotEmpty())) {
                     onConfirm(budget, cents, category, isCategoryScope)
                 } else {
@@ -462,4 +660,52 @@ private fun BudgetEditDialog(
 }
 
 @Composable
-private fun AssistantChipColorsDefault() = AssistChipDefaults.assistChipColors()
+private fun CycleSettingsDialog(
+    currentDay: Int,
+    cycle: BillingCycle,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var day by remember { mutableStateOf(currentDay.toFloat()) }
+    val preview = remember(day) {
+        BillingCycleCalculator.of(LocalDate.now(), day.roundToInt())
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("资金周期开始日") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "发薪日通常不是 1 号，把周期开始日设成发薪日，预算和开销才对得上。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "每月 ${day.roundToInt()} 号开始 · 当前周期 ${preview.label}",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Slider(
+                    value = day,
+                    onValueChange = { day = it },
+                    valueRange = BillingCycleCalculator.MIN_START_DAY.toFloat()..
+                        BillingCycleCalculator.MAX_START_DAY.toFloat(),
+                    steps = BillingCycleCalculator.MAX_START_DAY - BillingCycleCalculator.MIN_START_DAY - 1
+                )
+                Text(
+                    "范围 1–28：29/30/31 在部分月份不存在，容易产生歧义。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "改完后本页的「已用金额」会立即按新周期重新统计，历史账单不受影响。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(day.roundToInt()) }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
