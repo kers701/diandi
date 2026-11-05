@@ -14,6 +14,7 @@ object AppPrefs {
     private const val FILE_CAT_EXPENSE = "categories_expense"
     private const val FILE_CAT_INCOME = "categories_income"
     private const val FILE_HOME_TOTALS_PERIOD = "home_totals_period"
+    private const val FILE_BUDGET_CYCLE_START = "budget_cycle_start_day"
     const val HOME_TOTALS_TODAY = "today"
     const val HOME_TOTALS_MONTH = "month"
     const val HOME_TOTALS_YEAR = "year"
@@ -44,6 +45,8 @@ object AppPrefs {
         File(context.applicationContext.filesDir, FILE_AUTO_BILL_SEEN)
     private fun homeTotalsPeriodFile(context: Context): File =
         File(context.applicationContext.filesDir, FILE_HOME_TOTALS_PERIOD)
+    private fun budgetCycleStartFile(context: Context): File =
+        File(context.applicationContext.filesDir, FILE_BUDGET_CYCLE_START)
 
     fun getHomeTotalsPeriod(context: Context): String =
         homeTotalsPeriodFile(context).takeIf { it.exists() }?.readText()?.trim()
@@ -55,6 +58,18 @@ object AppPrefs {
     fun setHomeTotalsPeriod(context: Context, period: String) {
         require(period in setOf(HOME_TOTALS_TODAY, HOME_TOTALS_MONTH, HOME_TOTALS_YEAR, HOME_TOTALS_ALL))
         homeTotalsPeriodFile(context).writeText(period)
+    }
+
+    /** 资金月周期从每月几号开始（1–28），默认 1 号 */
+    fun getBudgetCycleStartDay(context: Context): Int =
+        budgetCycleStartFile(context).takeIf { it.exists() }
+            ?.readText()?.trim()?.toIntOrNull()
+            ?.coerceIn(BillingCycleCalculator.MIN_START_DAY, BillingCycleCalculator.MAX_START_DAY)
+            ?: BillingCycleCalculator.MIN_START_DAY
+
+    fun setBudgetCycleStartDay(context: Context, day: Int) {
+        val clamped = BillingCycleCalculator.clampStartDay(day)
+        budgetCycleStartFile(context).writeText(clamped.toString())
     }
 
     fun isNotifyEnabled(context: Context): Boolean {

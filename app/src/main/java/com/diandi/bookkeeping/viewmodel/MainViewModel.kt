@@ -316,6 +316,20 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
 
     fun monthExpenseByCategory(year: Int, month: Int) = repo.getMonthExpenseByCategory(year, month)
 
+    /** 资金周期内的支出合计（分） */
+    fun expenseInRange(startDate: String, endDate: String) =
+        repo.getExpenseInRange(startDate, endDate)
+
+    /** 资金周期内按大类汇总的支出（分） */
+    fun expenseByCategoryInRange(startDate: String, endDate: String) =
+        repo.getExpenseByCategoryInRange(startDate, endDate)
+
+    /** 批量创建智能预算 */
+    fun addBudgets(items: List<Budget>) {
+        if (items.isEmpty()) return
+        viewModelScope.launch { repo.addBudgets(items) }
+    }
+
     fun getCategoryDistribution(type: String, year: Int?, month: Int?, day: Int?) =
         repo.getCategoryDistribution(type, year, month, day)
 
