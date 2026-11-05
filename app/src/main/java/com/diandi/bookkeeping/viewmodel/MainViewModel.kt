@@ -287,14 +287,36 @@ class MainViewModel(private val repo: BookkeepingRepository) : ViewModel() {
 
     // ========== 预算 ==========
 
-    fun addBudget(scope: String, category: String, monthlyAmountCents: Long) {
+    fun addBudget(kind: String, scope: String, category: String, monthlyAmountCents: Long) {
         if (monthlyAmountCents <= 0L) return
-        if (scope == Budget.SCOPE_CATEGORY && category.isBlank()) return
+        if (kind == Budget.KIND_FIXED && category.isBlank()) return
         viewModelScope.launch {
             repo.addBudget(
                 Budget(
-                    scope = scope,
-                    category = if (scope == Budget.SCOPE_CATEGORY) category.trim() else "",
+                    kind = kind,
+                    scope = if (category.isBlank()) Budget.SCOPE_TOTAL else scope,
+                    category = if (category.isBlank()) "" else category.trim(),
+                    monthlyAmountCents = monthlyAmountCents
+                )
+            )
+        }
+    }
+
+    fun updateBudgetFull(
+        budget: Budget,
+        monthlyAmountCents: Long,
+        category: String,
+        kind: String,
+        scope: String
+    ) {
+        if (monthlyAmountCents <= 0L) return
+        if (kind == Budget.KIND_FIXED && category.isBlank()) return
+        viewModelScope.launch {
+            repo.updateBudget(
+                budget.copy(
+                    kind = kind,
+                    scope = if (category.isBlank()) Budget.SCOPE_TOTAL else scope,
+                    category = if (category.isBlank()) "" else category.trim(),
                     monthlyAmountCents = monthlyAmountCents
                 )
             )

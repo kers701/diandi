@@ -14,7 +14,7 @@ import com.diandi.bookkeeping.data.entity.Transaction
 
 @Database(
     entities = [Transaction::class, SavingsGoal::class, FundCorrection::class, Budget::class],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,7 +34,8 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_1_2,
                     MIGRATION_2_3,
                     MIGRATION_3_4,
-                    MIGRATION_4_5
+                    MIGRATION_4_5,
+                    MIGRATION_5_6
                 ).build()
                 INSTANCE = instance
                 instance
@@ -183,6 +184,40 @@ abstract class AppDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
+            }
+        }
+
+        /**
+         * 5 → 6：预算项区分「固定开销」与「浮动预算」。
+         * 旧数据一律按浮动预算处理（用户在预算页可以逐项改成固定开销）。
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // 旧预算一律按「浮动预算」处理；用户在预算页可逐项改成固定开销。
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `budgets_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `kind` TEXT NOT NULL,
+                        `scope` TEXT NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `monthlyAmount` INTEGER NOT NULL,
+                        `enabled` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    """
+                    INSERT INTO `budgets_new`
+                        (`id`, `kind`, `scope`, `category`, `monthlyAmount`, `enabled`, `createdAt`)
+                    SELECT
+                        `id`, 'FLOATING', `scope`, `category`, `monthlyAmount`, `enabled`, `createdAt`
+                    FROM `budgets`
+                    """.trimIndent()
+                )
+                database.execSQL("DROP TABLE `budgets`")
+                database.execSQL("ALTER TABLE `budgets_new` RENAME TO `budgets`")
             }
         }
     }
