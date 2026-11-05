@@ -9,6 +9,7 @@ import android.text.TextUtils
 import com.diandi.bookkeeping.data.db.AppDatabase
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.util.Categories
 import java.time.LocalDate
 import java.util.Locale
@@ -35,11 +36,11 @@ class AutoBillNotificationService : NotificationListenerService() {
 
         val content = notificationText(sbn) ?: return
         val parsed = AutoBillParser.parse(content, this) ?: return
-        val fingerprint = AutoBillParser.fingerprint(sbn, content, parsed.amount)
+        val fingerprint = AutoBillParser.fingerprint(sbn, content, parsed.amountCents)
         if (!AppPrefs.rememberAutoBillNotification(
                 this,
                 fingerprint,
-                parsed.amount,
+                parsed.amountCents,
                 parsed.type,
                 sbn.packageName
             )
@@ -50,7 +51,7 @@ class AutoBillNotificationService : NotificationListenerService() {
                 val now = LocalDate.now()
                 val insertedId = AppDatabase.getInstance(applicationContext).transactionDao().insert(
                     Transaction(
-                        amount = parsed.amount,
+                        amountCents = parsed.amountCents,
                         type = parsed.type,
                         category = parsed.category,
                         tags = "自动记账",
@@ -61,12 +62,7 @@ class AutoBillNotificationService : NotificationListenerService() {
                     )
                 )
                 if (insertedId > 0L) AiAnalysisScheduler.onBillInserted(applicationContext)
-                val amountText = if (parsed.amount == parsed.amount.toLong().toDouble()) {
-                    parsed.amount.toLong().toString()
-                } else {
-                    String.format(Locale.CHINA, "%.2f", parsed.amount)
-                }
-                val msg = "已自动记账，金额" + amountText
+                val msg = "已自动记账，金额" + Money.format(parsed.amountCents, grouping = false)
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
                 }
@@ -94,7 +90,7 @@ class AutoBillNotificationService : NotificationListenerService() {
 }
 
 data class ParsedAutoBill(
-    val amount: Double,
+    val amountCents: Long,
     val type: String,
     val category: String,
     val note: String
@@ -142,7 +138,7 @@ object AutoBillParser {
             return null
         }
 
-        val amount = pickAmount(text, paymentKeywords) ?: return null
+        val amountCents = pickAmountCents(text, paymentKeywords) ?: return null
 
         val isIncome = incomeKeywords.any { text.contains(it, ignoreCase = true) } ||
             lower.contains("received") || lower.contains("income")
@@ -156,7 +152,7 @@ object AutoBillParser {
         }
         val category = inferCategory(context, text, type == "INCOME")
         return ParsedAutoBill(
-            amount = amount,
+            amountCents = amountCents,
             type = type,
             category = category,
             note = "通知自动记账：${text.take(160)}"
@@ -170,14 +166,15 @@ object AutoBillParser {
      * 3. 排除像时间（03:21）、日期、尾号卡号中的片段（无「元」时本来就不会进候选）
      * 4. 优先靠近「支出/收入/消费…」且带「元」的金额
      */
-    private fun pickAmount(text: String, paymentKeywords: List<String>): Double? {
-        data class Cand(val value: Double, val start: Int, val end: Int, val score: Int)
+    internal fun pickAmountCents(text: String, paymentKeywords: List<String>): Long? {
+        data class Cand(val valueCents: Long, val start: Int, val end: Int, val score: Int)
 
         val cands = mutableListOf<Cand>()
         fun addMatch(match: MatchResult, base: Int) {
             val raw = match.groupValues.getOrNull(1)?.replace(",", "") ?: return
-            val value = raw.toDoubleOrNull() ?: return
-            if (value <= 0.0 || value >= 100_000_000.0) return
+            val valueCents = Money.parseToCents(raw) ?: return
+            // 上限 1 亿元（10_000_000_000 分），下限 1 分
+            if (valueCents <= 0L || valueCents >= 10_000_000_000L) return
             val start = match.range.first
             val end = match.range.last
             // 落在「余额」关键词之后的一小段 → 账户余额，不是交易额
@@ -201,13 +198,13 @@ object AutoBillParser {
             ) {
                 score += 25
             }
-            cands += Cand(value, start, end, score)
+            cands += Cand(valueCents, start, end, score)
         }
 
         yuanAmountRegex.findAll(text).forEach { addMatch(it, 50) }
         currencyAmountRegex.findAll(text).forEach { addMatch(it, 45) }
 
-        return cands.maxByOrNull { it.score }?.value
+        return cands.maxByOrNull { it.score }?.valueCents
     }
 
     private fun isAfterBalanceKeyword(text: String, amountStart: Int): Boolean {
@@ -231,9 +228,9 @@ object AutoBillParser {
         return false
     }
 
-    fun fingerprint(sbn: StatusBarNotification, content: String, amount: Double): String {
+    fun fingerprint(sbn: StatusBarNotification, content: String, amountCents: Long): String {
         val stableKey = sbn.key.ifBlank { "${sbn.packageName}:${sbn.id}" }
-        return "$stableKey|${amount}|${content.take(240)}"
+        return "$stableKey|${amountCents}|${content.take(240)}"
     }
 
     private fun inferCategory(

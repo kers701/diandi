@@ -1,7 +1,9 @@
 package com.diandi.bookkeeping.data.repository
 
 import android.content.Context
+import com.diandi.bookkeeping.data.dao.CategoryStat
 import com.diandi.bookkeeping.data.dao.TransactionDao
+import com.diandi.bookkeeping.data.entity.Budget
 import com.diandi.bookkeeping.data.entity.FundCorrection
 import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.data.entity.Transaction
@@ -55,8 +57,8 @@ class BookkeepingRepository(private val dao: TransactionDao, private val context
         dao.getTransactionTotals(startDate, endDate)
     fun getTotalCorrection() = dao.getTotalCorrection()
 
-    /** 当前余额 = 资金修正总和 + 收入 - 支出 */
-    fun getBalance(): Flow<Double> = combine(
+    /** 当前余额（分）= 资金修正总和 + 收入 - 支出 */
+    fun getBalance(): Flow<Long> = combine(
         getTotalCorrection(),
         getTotalIncome(),
         getTotalExpense()
@@ -68,16 +70,11 @@ class BookkeepingRepository(private val dao: TransactionDao, private val context
     fun getDailyStats(year: Int, month: Int) = dao.getDailyStats(year, month)
     fun getDailyStatsInRange(startDate: String, endDate: String) =
         dao.getDailyStatsInRange(startDate, endDate)
+
     fun getCategoryDistribution(type: String, year: Int?, month: Int?, day: Int?) =
         dao.getCategoryDistribution(type, year, month, day).map { rows ->
-            rows.flatMap { row ->
-                val categories = TransactionCategories.decode(row.category).ifEmpty { listOf(row.category) }
-                val amountPerCategory = row.total / categories.size
-                categories.map { category -> category to amountPerCategory }
-            }.groupBy({ it.first }, { it.second })
-                .map { (category, amounts) ->
-                    com.diandi.bookkeeping.data.dao.CategoryStat(category, amounts.sum())
-                }
+            splitCombinedCategories(rows)
+                .map { (category, total) -> CategoryStat(category, total) }
                 .sortedByDescending { it.total }
         }
 
@@ -90,4 +87,42 @@ class BookkeepingRepository(private val dao: TransactionDao, private val context
     suspend fun addCorrection(c: FundCorrection) = dao.insertCorrection(c)
     suspend fun updateCorrection(c: FundCorrection) = dao.updateCorrection(c)
     suspend fun deleteCorrection(c: FundCorrection) = dao.deleteCorrection(c)
+
+    // ========== 预算 ==========
+
+    fun getAllBudgets() = dao.getAllBudgets()
+    suspend fun addBudget(budget: Budget) = dao.insertBudget(budget)
+    suspend fun updateBudget(budget: Budget) = dao.updateBudget(budget)
+    suspend fun deleteBudget(budget: Budget) = dao.deleteBudget(budget)
+
+    /** 指定月份的支出合计（分） */
+    fun getMonthExpense(year: Int, month: Int) = dao.getMonthExpense(year, month)
+
+    /** 指定月份各大类的支出（分），组合类目已拆分 */
+    fun getMonthExpenseByCategory(year: Int, month: Int): Flow<Map<String, Long>> =
+        dao.getMonthExpenseByCategory(year, month).map { rows -> splitCombinedCategories(rows) }
+
+    /**
+     * 把「餐饮 + 交通」这类组合类目的金额拆到单个类目上。
+     * 除不尽的分按顺序补给前几个类目，保证拆完之后总额与原金额完全一致。
+     */
+    private fun splitCombinedCategories(rows: List<CategoryStat>): Map<String, Long> {
+        val merged = LinkedHashMap<String, Long>()
+        rows.forEach { row ->
+            val categories = TransactionCategories.decode(row.category).ifEmpty { listOf(row.category) }
+            if (categories.isEmpty()) return@forEach
+            val base = row.total / categories.size
+            var remainder = row.total % categories.size
+            categories.forEach { category ->
+                val extra = if (remainder > 0L) {
+                    remainder -= 1L
+                    1L
+                } else {
+                    0L
+                }
+                merged[category] = (merged[category] ?: 0L) + base + extra
+            }
+        }
+        return merged.entries.sortedByDescending { it.value }.associate { it.key to it.value }
+    }
 }

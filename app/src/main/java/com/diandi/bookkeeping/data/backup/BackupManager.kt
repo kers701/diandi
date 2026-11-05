@@ -9,6 +9,7 @@ import com.diandi.bookkeeping.data.entity.FundCorrection
 import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.util.Money
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -20,7 +21,8 @@ import java.time.LocalDate
 /** 用户可移植的数据备份；系统级授权不会包含在文件中。 */
 object BackupManager {
     private const val FORMAT = "com.diandi.bookkeeping.backup"
-    private const val VERSION = 1
+    private const val VERSION = 2
+    private const val MIN_READ_VERSION = 1
     private const val MAX_BACKUP_BYTES = 50 * 1024 * 1024
     private const val MAX_ROWS_PER_TABLE = 500_000
 
@@ -122,7 +124,7 @@ object BackupManager {
         val root = JSONObject(text)
         require(root.getString("format") == FORMAT) { "这不是点滴记账导出的备份文件。" }
         val version = root.getInt("version")
-        require(version == VERSION) {
+        require(version in MIN_READ_VERSION..VERSION) {
             if (version > VERSION) "备份文件版本较新，请升级点滴后再恢复。"
             else "备份文件版本不受支持。"
         }
@@ -131,8 +133,8 @@ object BackupManager {
             List(array.length()) { index ->
                 val item = array.getJSONObject(index)
                 val id = item.getLong("id").also { require(it > 0) { "账单编号无效。" } }
-                val amount = item.getDouble("amount").also {
-                    require(it.isFinite() && it > 0.0) { "账单金额无效。" }
+                val amountCents = item.readCents("amountCents", "amount").also {
+                    require(it > 0L) { "账单金额无效。" }
                 }
                 val type = item.getString("type")
                 require(type == "EXPENSE" || type == "INCOME") { "账单收支类型无效。" }
@@ -145,7 +147,7 @@ object BackupManager {
                 LocalDate.of(year, month, day)
                 Transaction(
                     id = id,
-                    amount = amount,
+                    amountCents = amountCents,
                     type = type,
                     category = category,
                     tags = item.getString("tags"),
@@ -165,26 +167,25 @@ object BackupManager {
                 val title = item.getString("title").also {
                     require(it.isNotBlank()) { "目标名称不能为空。" }
                 }
-                val target = item.getDouble("targetAmount").also {
-                    require(it.isFinite() && it >= 0.0) { "目标金额无效。" }
+                val targetCents = item.readCents("targetAmountCents", "targetAmount").also {
+                    require(it >= 0L) { "目标金额无效。" }
                 }
-                val current = item.getDouble("currentAmount").also {
-                    require(it.isFinite() && it >= 0.0) { "目标进度金额无效。" }
+                val currentCents = item.readCents("currentAmountCents", "currentAmount").also {
+                    require(it >= 0L) { "目标进度金额无效。" }
                 }
                 val allocationWeight = item.optDouble("allocationWeight", 1.0).also {
                     require(it.isFinite() && it in 0.01..1000.0) { "目标分配权重无效。" }
                 }
-                val lastManualDeposit = item.optDouble("lastManualDeposit", 0.0).also {
-                    require(it.isFinite() && it >= 0.0) { "最近存入金额无效。" }
-                }
+                val lastManualDepositCents = (item.optCents("lastManualDepositCents", "lastManualDeposit") ?: 0L)
+                    .also { require(it >= 0L) { "最近存入金额无效。" } }
                 SavingsGoal(
                     id = id,
                     title = title,
-                    targetAmount = target,
-                    currentAmount = current,
+                    targetAmountCents = targetCents,
+                    currentAmountCents = currentCents,
                     deadline = item.getString("deadline"),
                     allocationWeight = allocationWeight,
-                    lastManualDeposit = lastManualDeposit,
+                    lastManualDepositCents = lastManualDepositCents,
                     createdAt = item.getLong("createdAt").also { require(it >= 0) }
                 )
             }
@@ -194,16 +195,14 @@ object BackupManager {
             List(array.length()) { index ->
                 val item = array.getJSONObject(index)
                 val id = item.getLong("id").also { require(it > 0) { "资金修正编号无效。" } }
-                val amount = item.getDouble("amount").also {
-                    require(it.isFinite()) { "资金修正金额无效。" }
-                }
+                val amountCents = item.readCents("amountCents", "amount")
                 val year = item.getInt("year")
                 val month = item.getInt("month")
                 val day = item.getInt("day")
                 LocalDate.of(year, month, day)
                 FundCorrection(
                     id = id,
-                    amount = amount,
+                    amountCents = amountCents,
                     source = item.optString("source", "手动").ifBlank { "手动" },
                     note = item.getString("note"),
                     year = year,
@@ -230,6 +229,20 @@ object BackupManager {
         )
     }
 
+
+    /** 优先读新字段（分），回退到旧字段（元） */
+    private fun JSONObject.readCents(centsKey: String, yuanKey: String): Long {
+        val cents = optCents(centsKey, yuanKey)
+        require(cents != null) { "金额字段缺失。" }
+        return cents
+    }
+
+    private fun JSONObject.optCents(centsKey: String, yuanKey: String): Long? {
+        if (has(centsKey) && !isNull(centsKey)) return getLong(centsKey)
+        if (has(yuanKey) && !isNull(yuanKey)) return Money.fromYuan(getDouble(yuanKey))
+        return null
+    }
+
     private fun JSONArray.checkedSize(label: String): JSONArray {
         require(length() <= MAX_ROWS_PER_TABLE) { "${label}数量超出允许范围。" }
         return this
@@ -246,7 +259,8 @@ object BackupManager {
 
     private fun Transaction.toJson() = JSONObject()
         .put("id", id)
-        .put("amount", amount)
+        .put("amountCents", amountCents)
+        .put("amount", Money.toYuanString(amountCents).toDouble())
         .put("type", type)
         .put("category", category)
         .put("tags", tags)
@@ -259,16 +273,20 @@ object BackupManager {
     private fun SavingsGoal.toJson() = JSONObject()
         .put("id", id)
         .put("title", title)
-        .put("targetAmount", targetAmount)
-        .put("currentAmount", currentAmount)
+        .put("targetAmountCents", targetAmountCents)
+        .put("currentAmountCents", currentAmountCents)
+        .put("targetAmount", Money.toYuanString(targetAmountCents).toDouble())
+        .put("currentAmount", Money.toYuanString(currentAmountCents).toDouble())
         .put("deadline", deadline)
         .put("allocationWeight", allocationWeight)
-        .put("lastManualDeposit", lastManualDeposit)
+        .put("lastManualDepositCents", lastManualDepositCents)
+        .put("lastManualDeposit", Money.toYuanString(lastManualDepositCents).toDouble())
         .put("createdAt", createdAt)
 
     private fun FundCorrection.toJson() = JSONObject()
         .put("id", id)
-        .put("amount", amount)
+        .put("amountCents", amountCents)
+        .put("amount", Money.toYuanString(amountCents).toDouble())
         .put("source", source)
         .put("note", note)
         .put("year", year)

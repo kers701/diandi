@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.TransactionCategories
@@ -53,11 +54,7 @@ fun AddScreen(
             }
             if (tx != null) {
                 type = tx.type
-                amountText = if (tx.amount == tx.amount.toLong().toDouble()) {
-                    tx.amount.toLong().toString()
-                } else {
-                    "%.2f".format(tx.amount)
-                }
+                amountText = Money.toInputText(tx.amountCents)
                 selectedCategories = TransactionCategories.decode(tx.category).toSet()
                 tags = tx.tags
                 note = tx.note
@@ -187,12 +184,12 @@ fun AddScreen(
 
             Button(
                 onClick = {
-                    val amount = amountText.toDoubleOrNull()
-                    if (amount != null && amount > 0) {
+                    val amountCents = Money.parseToCents(amountText)
+                    if (amountCents != null && amountCents > 0L) {
                         if (editId != null) {
                             viewModel.updateTransaction(
                                 id = editId,
-                                amount = amount,
+                                amountCents = amountCents,
                                 type = type,
                                 category = TransactionCategories.encode(selectedCategories),
                                 tags = tags,
@@ -202,7 +199,7 @@ fun AddScreen(
                             )
                         } else {
                             viewModel.addTransaction(
-                                amount = amount,
+                                amountCents = amountCents,
                                 type = type,
                                 category = TransactionCategories.encode(selectedCategories),
                                 tags = tags,
@@ -214,7 +211,7 @@ fun AddScreen(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = amountText.toDoubleOrNull()?.let { it > 0 } == true
+                enabled = Money.parseToCents(amountText)?.let { it > 0L } == true
             ) {
                 Text(if (editId != null) "保存修改" else "保存")
             }

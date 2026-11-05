@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 import com.diandi.bookkeeping.QuickAddActivity
 import com.diandi.bookkeeping.data.db.AppDatabase
 import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.util.Money
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
@@ -159,28 +160,27 @@ class KeepAliveService : Service() {
     private fun computeProgressText(): Triple<String, String, Int> {
         return try {
             val dao = AppDatabase.getInstance(applicationContext).transactionDao()
-            val (balance, targetSum) = runBlocking {
+            val (balanceCents, targetSumCents) = runBlocking {
                 val c = dao.getTotalCorrection().first()
                 val inc = dao.getTotalIncome().first()
                 val exp = dao.getTotalExpense().first()
                 val goals = dao.getAllGoals().first()
-                (c + inc - exp) to goals.sumOf { it.targetAmount }
+                (c + inc - exp) to goals.sumOf { it.targetAmountCents }
             }
-            val pct = if (targetSum > 0) {
-                ((balance / targetSum) * 100).coerceIn(0.0, 999.0)
+            val pct = if (targetSumCents > 0L) {
+                (balanceCents.toDouble() / targetSumCents.toDouble() * 100).coerceIn(0.0, 999.0)
             } else {
                 0.0
             }
             val pctStr = "%.0f".format(pct)
-            val bal0 = "%.0f".format(balance)
-            val tgt0 = "%.0f".format(targetSum)
-            val bal2 = "%.2f".format(balance)
-            val text = if (targetSum > 0) {
-                "攒钱进度 ${pctStr}% · 余额¥${bal0} / 目标¥${tgt0}"
+            val balText = Money.format(balanceCents, grouping = false)
+            val tgtText = Money.format(targetSumCents, grouping = false)
+            val text = if (targetSumCents > 0L) {
+                "攒钱进度 ${pctStr}% · 余额¥$balText / 目标¥$tgtText"
             } else {
-                "余额 ¥${bal2} · 点击记一笔"
+                "余额 ¥$balText · 点击记一笔"
             }
-            val title = if (targetSum > 0) {
+            val title = if (targetSumCents > 0L) {
                 "点滴记账 · 攒钱 ${pctStr}%"
             } else {
                 "点滴记账"

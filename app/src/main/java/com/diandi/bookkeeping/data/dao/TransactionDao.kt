@@ -1,6 +1,7 @@
 package com.diandi.bookkeeping.data.dao
 
 import androidx.room.*
+import com.diandi.bookkeeping.data.entity.Budget
 import com.diandi.bookkeeping.data.entity.FundCorrection
 import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.data.entity.Transaction
@@ -37,11 +38,11 @@ interface TransactionDao {
 
     @Query("""
         SELECT
-            (SELECT COALESCE(SUM(amount), 0.0) FROM fund_corrections) +
-            (SELECT COALESCE(SUM(amount), 0.0) FROM transactions WHERE type = 'INCOME') -
-            (SELECT COALESCE(SUM(amount), 0.0) FROM transactions WHERE type = 'EXPENSE')
+            (SELECT COALESCE(SUM(amount), 0) FROM fund_corrections) +
+            (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'INCOME') -
+            (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'EXPENSE')
     """)
-    suspend fun getCurrentLedgerBalance(): Double
+    suspend fun getCurrentLedgerBalance(): Long
 
     @Query("""
         SELECT * FROM transactions
@@ -54,9 +55,8 @@ interface TransactionDao {
               OR tags LIKE '%' || :tagQuery || '%'
               OR category LIKE '%' || :tagQuery || '%'
               OR note LIKE '%' || :tagQuery || '%'
-              OR CAST(amount AS TEXT) LIKE '%' || :tagQuery || '%'
-              OR printf('%.2f', amount) LIKE '%' || :tagQuery || '%'
-              OR printf('%.2f', amount) LIKE '%' || replace(replace(:tagQuery, '¥', ''), '￥', '') || '%'
+              OR printf('%.2f', amount / 100.0) LIKE '%' || :tagQuery || '%'
+              OR printf('%.2f', amount / 100.0) LIKE '%' || replace(replace(:tagQuery, '¥', ''), '￥', '') || '%'
           )
         ORDER BY year DESC, month DESC, day DESC, createdAt DESC
     """)
@@ -91,15 +91,15 @@ interface TransactionDao {
     suspend fun delete(transaction: Transaction)
 
     @Query("SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'INCOME'")
-    fun getTotalIncome(): Flow<Double>
+    fun getTotalIncome(): Flow<Long>
 
     @Query("SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'EXPENSE'")
-    fun getTotalExpense(): Flow<Double>
+    fun getTotalExpense(): Flow<Long>
 
     @Query("""
         SELECT
-            COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0.0) AS income,
-            COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0.0) AS expense
+            COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) AS income,
+            COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0) AS expense
         FROM transactions
         WHERE (:startDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) >= :startDate)
           AND (:endDate IS NULL OR printf('%04d-%02d-%02d', year, month, day) <= :endDate)
@@ -158,6 +158,44 @@ interface TransactionDao {
         day: Int?
     ): Flow<List<CategoryStat>>
 
+
+    // ========== 预算 ==========
+    @Query("SELECT * FROM budgets ORDER BY scope DESC, createdAt ASC")
+    fun getAllBudgets(): Flow<List<Budget>>
+
+    @Query("SELECT * FROM budgets ORDER BY id ASC")
+    suspend fun getBudgetsForBackup(): List<Budget>
+
+    @Query("DELETE FROM budgets")
+    suspend fun deleteAllBudgets()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBudgets(items: List<Budget>)
+
+    @Insert
+    suspend fun insertBudget(budget: Budget): Long
+
+    @Update
+    suspend fun updateBudget(budget: Budget)
+
+    @Delete
+    suspend fun deleteBudget(budget: Budget)
+
+    /** 指定月份的总支出（分） */
+    @Query("""
+        SELECT COALESCE(SUM(amount), 0) FROM transactions
+        WHERE type = 'EXPENSE' AND year = :year AND month = :month
+    """)
+    fun getMonthExpense(year: Int, month: Int): Flow<Long>
+
+    /** 指定月份按大类汇总的支出（分）；组合类目（「A + B」）在仓库层拆分 */
+    @Query("""
+        SELECT category, SUM(amount) as total FROM transactions
+        WHERE type = 'EXPENSE' AND year = :year AND month = :month
+        GROUP BY category
+    """)
+    fun getMonthExpenseByCategory(year: Int, month: Int): Flow<List<CategoryStat>>
+
     // ========== 攒钱目标 ==========
     @Query("SELECT * FROM savings_goals ORDER BY createdAt DESC")
     fun getAllGoals(): Flow<List<SavingsGoal>>
@@ -194,7 +232,7 @@ interface TransactionDao {
     suspend fun insertCorrections(items: List<FundCorrection>)
 
     @Query("SELECT COALESCE(SUM(amount), 0) FROM fund_corrections")
-    fun getTotalCorrection(): Flow<Double>
+    fun getTotalCorrection(): Flow<Long>
 
     @Insert
     suspend fun insertCorrection(correction: FundCorrection): Long
@@ -209,24 +247,31 @@ interface TransactionDao {
 data class MonthlyStat(
     val year: Int,
     val month: Int,
-    val expense: Double,
-    val income: Double
+    /** 分 */
+    val expense: Long,
+    /** 分 */
+    val income: Long
 )
 
 data class DailyStat(
     val year: Int,
     val month: Int,
     val day: Int,
-    val expense: Double,
-    val income: Double
+    /** 分 */
+    val expense: Long,
+    /** 分 */
+    val income: Long
 )
 
 data class CategoryStat(
     val category: String,
-    val total: Double
+    /** 分 */
+    val total: Long
 )
 
 data class TransactionTotals(
-    val income: Double,
-    val expense: Double
+    /** 分 */
+    val income: Long,
+    /** 分 */
+    val expense: Long
 )

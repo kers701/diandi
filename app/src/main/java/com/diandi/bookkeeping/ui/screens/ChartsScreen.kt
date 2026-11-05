@@ -22,6 +22,8 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.diandi.bookkeeping.ui.components.formatMoney
+import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.ui.components.TypeChip
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 import java.time.LocalDate
@@ -151,7 +153,8 @@ fun ChartsScreen(
                         .takeWhile { !it.isAfter(lineEndDate) }
                         .toList()
                     val linePoints = chartDates.map { date ->
-                        date to (statsByDate[date]?.expense ?: 0.0).toFloat()
+                        // 统计值是「分」，折线图按「元」绘制
+                        date to Money.toYuan(statsByDate[date]?.expense ?: 0L).toFloat()
                     }
                     val periodDescription = when (period) {
                         "year" -> "${selectedDate.year}年每日"
@@ -167,7 +170,7 @@ fun ChartsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (dailyRangeStats.none { it.expense > 0.0 }) {
+                    if (dailyRangeStats.none { it.expense > 0L }) {
                         Text("该周期暂无支出数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         val expenses = linePoints.map { it.second }
@@ -330,7 +333,7 @@ fun ChartsScreen(
                     if (categoryStats.isEmpty()) {
                         Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
-                        val total = categoryStats.sumOf { it.total }.coerceAtLeast(0.0001)
+                        val totalCents = categoryStats.sumOf { it.total }.coerceAtLeast(1L)
                         // 扇形图
                         Canvas(
                             modifier = Modifier
@@ -343,7 +346,7 @@ fun ChartsScreen(
                             val top = (size.height - diameter) / 2f
                             var startAngle = -90f
                             categoryStats.forEachIndexed { i, stat ->
-                                val sweep = (stat.total / total * 360.0).toFloat()
+                                val sweep = (stat.total.toDouble() / totalCents.toDouble() * 360.0).toFloat()
                                 drawArc(
                                     color = PIE_COLORS[i % PIE_COLORS.size],
                                     startAngle = startAngle,
@@ -357,7 +360,7 @@ fun ChartsScreen(
                                     val mid = Math.toRadians((startAngle + sweep / 2).toDouble())
                                     val cx = left + diameter / 2 + cos(mid).toFloat() * diameter * 0.32f
                                     val cy = top + diameter / 2 + sin(mid).toFloat() * diameter * 0.32f
-                                    val pct = stat.total / total * 100
+                                    val pct = stat.total.toDouble() / totalCents.toDouble() * 100
                                     val paint = android.graphics.Paint().apply {
                                         color = android.graphics.Color.WHITE
                                         textAlign = android.graphics.Paint.Align.CENTER
@@ -377,7 +380,7 @@ fun ChartsScreen(
                         }
                         // 图例 + 进度条
                         categoryStats.forEachIndexed { i, stat ->
-                            val percent = if (total > 0) (stat.total / total * 100) else 0.0
+                            val percent = stat.total.toDouble() / totalCents.toDouble() * 100
                             val color = PIE_COLORS[i % PIE_COLORS.size]
                             Column(Modifier.fillMaxWidth()) {
                                 Row(
@@ -392,7 +395,7 @@ fun ChartsScreen(
                                         Spacer(Modifier.width(8.dp))
                                         Text(stat.category)
                                     }
-                                    Text("¥${"%.2f".format(stat.total)}  (${"%.1f".format(percent)}%)")
+                                    Text("${formatMoney(stat.total)}  (${"%.1f".format(percent)}%)")
                                 }
                                 LinearProgressIndicator(
                                     progress = { (percent / 100).toFloat() },

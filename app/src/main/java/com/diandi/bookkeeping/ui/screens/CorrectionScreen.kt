@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.data.entity.FundCorrection
 import com.diandi.bookkeeping.ui.components.formatMoney
+import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,11 +98,11 @@ fun CorrectionScreen(
                 showAdd = false
                 correctionToEdit = null
             },
-            onSave = { amount, source, note ->
+            onSave = { amountCents, source, note ->
                 if (editingCorrection == null) {
-                    viewModel.addCorrection(amount = amount, note = note, source = source)
+                    viewModel.addCorrection(amountCents = amountCents, note = note, source = source)
                 } else {
-                    viewModel.updateCorrection(editingCorrection, amount, source, note)
+                    viewModel.updateCorrection(editingCorrection, amountCents, source, note)
                 }
                 showAdd = false
                 correctionToEdit = null
@@ -114,7 +115,7 @@ fun CorrectionScreen(
             onDismissRequest = { correctionToDelete = null },
             title = { Text("删除资金修正？") },
             text = {
-                Text("确定要删除“${correction.source}”来源的 ${formatMoney(correction.amount)} 修正吗？删除后无法恢复。")
+                Text("确定要删除“${correction.source}”来源的 ${formatMoney(correction.amountCents)} 修正吗？删除后无法恢复。")
             },
             confirmButton = {
                 TextButton(
@@ -138,10 +139,10 @@ fun CorrectionScreen(
 private fun CorrectionEditorDialog(
     correction: FundCorrection?,
     onDismiss: () -> Unit,
-    onSave: (amount: Double, source: String, note: String) -> Unit
+    onSave: (amountCents: Long, source: String, note: String) -> Unit
 ) {
     var amountText by remember(correction?.id) {
-        mutableStateOf(correction?.amount?.toString() ?: "")
+        mutableStateOf(correction?.let { Money.format(it.amountCents, grouping = false) } ?: "")
     }
     var source by remember(correction?.id) {
         mutableStateOf(correction?.source ?: "手动")
@@ -149,7 +150,7 @@ private fun CorrectionEditorDialog(
     var note by remember(correction?.id) {
         mutableStateOf(correction?.note ?: "")
     }
-    val amount = amountText.toDoubleOrNull()?.takeIf { it.isFinite() }
+    val amountCents = Money.parseToCents(amountText)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -183,8 +184,8 @@ private fun CorrectionEditorDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = amount != null && source.isNotBlank(),
-                onClick = { amount?.let { onSave(it, source.trim(), note.trim()) } }
+                enabled = amountCents != null && source.isNotBlank(),
+                onClick = { amountCents?.let { onSave(it, source.trim(), note.trim()) } }
             ) { Text("保存") }
         },
         dismissButton = {
@@ -260,9 +261,9 @@ private fun CorrectionCard(
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            formatMoney(correction.amount),
+                            formatMoney(correction.amountCents),
                             fontWeight = FontWeight.Bold,
-                            color = if (correction.amount >= 0) MaterialTheme.colorScheme.primary
+                            color = if (correction.amountCents >= 0L) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.error
                         )
                         Text("来源：${correction.source}", style = MaterialTheme.typography.bodySmall)

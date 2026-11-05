@@ -54,6 +54,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.diandi.bookkeeping.data.entity.SavingsGoal
 import com.diandi.bookkeeping.ui.components.formatMoney
+import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.util.allocateBalanceByWeight
 import com.diandi.bookkeeping.viewmodel.MainViewModel
 
@@ -117,7 +118,7 @@ fun GoalsScreen(
                 items(goals, key = { it.id }) { goal ->
                     GoalCard(
                         goal = goal,
-                        allocatedAmount = allocatedByGoal[goal.id] ?: 0.0,
+                        allocatedCents = allocatedByGoal[goal.id] ?: 0L,
                         onAddProgress = { amount -> viewModel.updateGoalProgress(goal, amount) },
                         onReduceProgress = { amount -> viewModel.reduceGoalProgress(goal, amount) },
                         onUndoProgress = { viewModel.undoLastGoalDeposit(goal) },
@@ -199,9 +200,9 @@ fun GoalsScreen(
 @Composable
 fun GoalCard(
     goal: SavingsGoal,
-    allocatedAmount: Double,
-    onAddProgress: (Double) -> Unit,
-    onReduceProgress: (Double) -> Unit,
+    allocatedCents: Long,
+    onAddProgress: (Long) -> Unit,
+    onReduceProgress: (Long) -> Unit,
     onUndoProgress: () -> Unit,
     onResetProgress: () -> Unit,
     onEdit: () -> Unit,
@@ -214,10 +215,10 @@ fun GoalCard(
     val lockedHeight = if (cardHeightPx > 0) {
         with(density) { cardHeightPx.toDp() }.coerceAtLeast(200.dp)
     } else 200.dp
-    val manualAmount = amountText.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 }
-    val displayedAmount = goal.currentAmount + allocatedAmount
-    val progress = if (goal.targetAmount > 0.0) {
-        (displayedAmount / goal.targetAmount).coerceIn(0.0, 1.0).toFloat()
+    val manualCents = Money.parseToCents(amountText)?.takeIf { it > 0L }
+    val displayedCents = goal.currentAmountCents + allocatedCents
+    val progress = if (goal.targetAmountCents > 0L) {
+        (displayedCents.toDouble() / goal.targetAmountCents.toDouble()).coerceIn(0.0, 1.0).toFloat()
     } else 0f
 
     Crossfade(
@@ -271,11 +272,11 @@ fun GoalCard(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(goal.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "${formatMoney(displayedAmount)} / ${formatMoney(goal.targetAmount)}",
+                        "${formatMoney(displayedCents)} / ${formatMoney(goal.targetAmountCents)}",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        "手动记录 ${formatMoney(goal.currentAmount)}  +  余额分配 ${formatMoney(allocatedAmount)}",
+                        "手动记录 ${formatMoney(goal.currentAmountCents)}  +  余额分配 ${formatMoney(allocatedCents)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -294,25 +295,25 @@ fun GoalCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(
-                            enabled = manualAmount != null,
-                            onClick = { manualAmount?.let { onAddProgress(it); amountText = "" } }
+                            enabled = manualCents != null,
+                            onClick = { manualCents?.let { onAddProgress(it); amountText = "" } }
                         ) { Text("存入") }
                         TextButton(
-                            enabled = manualAmount != null && goal.currentAmount > 0.0,
-                            onClick = { manualAmount?.let { onReduceProgress(it); amountText = "" } }
+                            enabled = manualCents != null && goal.currentAmountCents > 0L,
+                            onClick = { manualCents?.let { onReduceProgress(it); amountText = "" } }
                         ) { Text("降低") }
                         TextButton(
-                            enabled = goal.lastManualDeposit > 0.0,
+                            enabled = goal.lastManualDepositCents > 0L,
                             onClick = onUndoProgress
                         ) { Text("撤销") }
                         TextButton(
-                            enabled = goal.currentAmount > 0.0,
+                            enabled = goal.currentAmountCents > 0L,
                             onClick = onResetProgress
                         ) { Text("重置") }
                     }
-                    if (goal.lastManualDeposit > 0.0) {
+                    if (goal.lastManualDepositCents > 0L) {
                         Text(
-                            "最近存入 ${formatMoney(goal.lastManualDeposit)} 可撤销",
+                            "最近存入 ${formatMoney(goal.lastManualDepositCents)} 可撤销",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -326,7 +327,7 @@ fun GoalCard(
 @Composable
 fun AddGoalDialog(
     onDismiss: () -> Unit,
-    onConfirm: (String, Double) -> Unit
+    onConfirm: (String, Long) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var target by remember { mutableStateOf("") }
@@ -361,9 +362,9 @@ fun AddGoalDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val targetValue = target.toDoubleOrNull()
-                if (title.isNotBlank() && targetValue != null && targetValue.isFinite() && targetValue > 0.0) {
-                    onConfirm(title.trim(), targetValue)
+                val targetCents = Money.parseToCents(target)
+                if (title.isNotBlank() && targetCents != null && targetCents > 0L) {
+                    onConfirm(title.trim(), targetCents)
                 } else {
                     invalid = true
                 }
@@ -377,10 +378,10 @@ fun AddGoalDialog(
 fun EditGoalDialog(
     goal: SavingsGoal,
     onDismiss: () -> Unit,
-    onConfirm: (String, Double, Double) -> Unit
+    onConfirm: (String, Long, Double) -> Unit
 ) {
     var title by remember(goal.id) { mutableStateOf(goal.title) }
-    var target by remember(goal.id) { mutableStateOf(formatMoneyInput(goal.targetAmount)) }
+    var target by remember(goal.id) { mutableStateOf(Money.toInputText(goal.targetAmountCents)) }
     var weight by remember(goal.id) { mutableStateOf(formatWeight(goal.allocationWeight)) }
     var invalid by remember(goal.id) { mutableStateOf(false) }
 
@@ -422,12 +423,12 @@ fun EditGoalDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val targetValue = target.toDoubleOrNull()
+                val targetCents = Money.parseToCents(target)
                 val weightValue = weight.toDoubleOrNull()
-                if (title.isNotBlank() && targetValue != null && targetValue.isFinite() && targetValue > 0.0 &&
+                if (title.isNotBlank() && targetCents != null && targetCents > 0L &&
                     weightValue != null && weightValue.isFinite() && weightValue in 0.01..1000.0
                 ) {
-                    onConfirm(title.trim(), targetValue, weightValue)
+                    onConfirm(title.trim(), targetCents, weightValue)
                 } else {
                     invalid = true
                 }
@@ -440,5 +441,3 @@ fun EditGoalDialog(
 private fun formatWeight(weight: Double): String =
     if (weight % 1.0 == 0.0) weight.toLong().toString() else weight.toString()
 
-private fun formatMoneyInput(amount: Double): String =
-    if (amount % 1.0 == 0.0) amount.toLong().toString() else amount.toString()

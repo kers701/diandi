@@ -51,6 +51,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.diandi.bookkeeping.data.ai.AiAnalysisPrefs
 import com.diandi.bookkeeping.data.dao.CategoryStat
 import com.diandi.bookkeeping.data.dao.TransactionTotals
+import com.diandi.bookkeeping.data.entity.Budget
 import com.diandi.bookkeeping.data.entity.Transaction
 import com.diandi.bookkeeping.ui.components.BalanceCard
 import com.diandi.bookkeeping.ui.components.TypeChip
@@ -59,6 +60,7 @@ import com.diandi.bookkeeping.viewmodel.MainViewModel
 import com.diandi.bookkeeping.util.Categories
 import com.diandi.bookkeeping.util.AppUpdateChecker
 import com.diandi.bookkeeping.util.AppPrefs
+import com.diandi.bookkeeping.util.Money
 import com.diandi.bookkeeping.util.allocateBalanceByWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -83,7 +85,8 @@ fun HomeScreen(
     onAboutClick: () -> Unit = {},
     onCategoryEditClick: () -> Unit = {},
     onEditClick: (Long) -> Unit = {},
-    onAiAnalysisClick: () -> Unit = {}
+    onAiAnalysisClick: () -> Unit = {},
+    onBudgetClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -104,9 +107,19 @@ fun HomeScreen(
     val totalsFlow = remember(viewModel, homeTotalsPeriod, totalsBaseDate) {
         viewModel.getTransactionTotals(totalsStartDate?.toString(), totalsEndDate)
     }
-    val totals by totalsFlow.collectAsState(initial = TransactionTotals(0.0, 0.0))
+    val totals by totalsFlow.collectAsState(initial = TransactionTotals(0L, 0L))
     val income = totals.income
     val expense = totals.expense
+
+    // 本月预算
+    val budgets by viewModel.budgets.collectAsState()
+    val totalBudget = remember(budgets) {
+        budgets.firstOrNull { it.scope == Budget.SCOPE_TOTAL && it.enabled }
+    }
+    val budgetMonth = remember { LocalDate.now() }
+    val monthExpense by remember(budgetMonth.year, budgetMonth.monthValue) {
+        viewModel.monthExpense(budgetMonth.year, budgetMonth.monthValue)
+    }.collectAsState(initial = 0L)
     val totalsPeriodLabel = when (homeTotalsPeriod) {
         AppPrefs.HOME_TOTALS_TODAY -> "本日"
         AppPrefs.HOME_TOTALS_MONTH -> "本月"
@@ -344,20 +357,28 @@ fun HomeScreen(
             if (!showBillsPage) {
                 Spacer(Modifier.height(8.dp))
                 BalanceCard(
-                    balance = balance,
-                    income = income,
-                    expense = expense,
+                    balanceCents = balance,
+                    incomeCents = income,
+                    expenseCents = expense,
                     summaryPeriodLabel = totalsPeriodLabel,
                     accentColor = balanceAccent
                 )
 
+                // 本月预算：设置过就显示进度，没设置给个入口
+                Spacer(Modifier.height(8.dp))
+                BudgetSummaryCard(
+                    budgetCents = totalBudget?.monthlyAmountCents,
+                    spentCents = monthExpense,
+                    onClick = onBudgetClick
+                )
+
             val goals by viewModel.goals.collectAsState()
-            val targetSum = goals.sumOf { it.targetAmount }
+            val targetSum = goals.sumOf { it.targetAmountCents }
             val allocationByGoal = remember(goals, balance) {
                 allocateBalanceByWeight(balance, goals)
             }
-            if (targetSum > 0) {
-                val pct = ((balance / targetSum) * 100).coerceIn(0.0, 999.0)
+            if (targetSum > 0L) {
+                val pct = (balance.toDouble() / targetSum.toDouble() * 100).coerceIn(0.0, 999.0)
                 Spacer(Modifier.height(8.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -396,10 +417,11 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             goals.forEach { goal ->
-                                val allocated = allocationByGoal[goal.id] ?: 0.0
-                                val displayed = goal.currentAmount + allocated
-                                val goalProgress = if (goal.targetAmount > 0.0) {
-                                    (displayed / goal.targetAmount).coerceIn(0.0, 1.0).toFloat()
+                                val allocated = allocationByGoal[goal.id] ?: 0L
+                                val displayed = goal.currentAmountCents + allocated
+                                val goalProgress = if (goal.targetAmountCents > 0L) {
+                                    (displayed.toDouble() / goal.targetAmountCents.toDouble())
+                                        .coerceIn(0.0, 1.0).toFloat()
                                 } else 0f
                                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Row(
@@ -411,7 +433,7 @@ fun HomeScreen(
                                             style = MaterialTheme.typography.labelMedium
                                         )
                                         Text(
-                                            "${formatMoney(displayed)} / ${formatMoney(goal.targetAmount)}",
+                                            "${formatMoney(displayed)} / ${formatMoney(goal.targetAmountCents)}",
                                             style = MaterialTheme.typography.labelMedium
                                         )
                                     }
@@ -775,7 +797,7 @@ fun HomeScreen(
             onDismissRequest = { transactionToDelete = null },
             title = { Text("删除账单？") },
             text = {
-                Text("确定要删除 ${tx.category} ${formatMoney(tx.amount)} 这笔账单吗？删除后无法恢复。")
+                Text("确定要删除 ${tx.category} ${formatMoney(tx.amountCents)} 这笔账单吗？删除后无法恢复。")
             },
             confirmButton = {
                 TextButton(
@@ -809,9 +831,9 @@ private fun HomeCategoryChart(
     val entries = remember(stats) {
         val top = stats.take(5)
         val remainder = stats.drop(5).sumOf { it.total }
-        if (remainder > 0.0) top + CategoryStat("其他", remainder) else top
+        if (remainder > 0L) top + CategoryStat("其他", remainder) else top
     }
-    val total = entries.sumOf { it.total }.coerceAtLeast(0.0001)
+    val totalCents = entries.sumOf { it.total }.coerceAtLeast(1L)
 
     Card(
         modifier = modifier,
@@ -847,7 +869,7 @@ private fun HomeCategoryChart(
                         val top = (size.height - diameter) / 2f
                         var startAngle = -90f
                         entries.forEachIndexed { index, entry ->
-                            val sweep = (entry.total / total * 360.0).toFloat()
+                            val sweep = (entry.total.toDouble() / totalCents.toDouble() * 360.0).toFloat()
                             drawArc(
                                 color = HOME_CATEGORY_COLORS[index % HOME_CATEGORY_COLORS.size],
                                 startAngle = startAngle,
@@ -866,7 +888,7 @@ private fun HomeCategoryChart(
                     ) {
                         entries.forEachIndexed { index, entry ->
                             val color = HOME_CATEGORY_COLORS[index % HOME_CATEGORY_COLORS.size]
-                            val fraction = (entry.total / total).toFloat().coerceIn(0f, 1f)
+                            val fraction = (entry.total.toDouble() / totalCents.toDouble()).toFloat().coerceIn(0f, 1f)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
@@ -904,14 +926,84 @@ private fun HomeCategoryChart(
     }
 }
 
-private fun balanceAccentColor(balance: Double): Color {
+
+/** 首页预算摘要：未设置时是一个轻量入口，设置后显示本月剩余/超支 */
+@Composable
+private fun BudgetSummaryCard(
+    budgetCents: Long?,
+    spentCents: Long,
+    onClick: () -> Unit
+) {
+    val configured = budgetCents != null && budgetCents > 0L
+    val progress = if (configured) {
+        Money.ratio(spentCents, budgetCents!!).toFloat().coerceIn(0f, 1f)
+    } else 0f
+    val remaining = (budgetCents ?: 0L) - spentCents
+    val over = configured && remaining < 0L
+    val warn = configured && !over && progress >= 0.8f
+    val accent = when {
+        over -> MaterialTheme.colorScheme.error
+        warn -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.primary
+    }
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = 0.12f))
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("本月预算", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (configured) {
+                        "${formatMoney(spentCents)} / ${formatMoney(budgetCents!!)}"
+                    } else {
+                        "点击设置 →"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = accent
+                )
+            }
+            if (configured) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = accent
+                )
+                Text(
+                    when {
+                        over -> "已超支 ${formatMoney(-remaining)}"
+                        warn -> "快用完了，还剩 ${formatMoney(remaining)}"
+                        else -> "还剩 ${formatMoney(remaining)}"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (over) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    "给本月设个上限，首页就能随时看到还能花多少",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+private fun balanceAccentColor(balanceCents: Long): Color {
     val neutral = Color(0xFF607D8B)
     val target = when {
-        balance > 0.0 -> Color(0xFF2E7D32)
-        balance < 0.0 -> Color(0xFFC62828)
+        balanceCents > 0L -> Color(0xFF2E7D32)
+        balanceCents < 0L -> Color(0xFFC62828)
         else -> Color(0xFF8D6E63)
     }
-    val strength = (abs(balance) / (abs(balance) + 1000.0)).toFloat().coerceIn(0.0f, 1.0f)
+    // 以「元」为量级做渐变，100000 分 = 1000 元
+    val absYuan = abs(balanceCents).toDouble() / 100.0
+    val strength = (absYuan / (absYuan + 1000.0)).toFloat().coerceIn(0.0f, 1.0f)
     return Color(
         red = neutral.red + (target.red - neutral.red) * strength,
         green = neutral.green + (target.green - neutral.green) * strength,
@@ -1044,7 +1136,7 @@ fun TransactionItem(
                         )
                     }
                     Text(
-                        "$sign${"%.2f".format(tx.amount)}",
+                        "$sign${formatMoney(tx.amountCents)}",
                         color = amountColor,
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp
