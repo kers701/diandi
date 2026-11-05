@@ -57,9 +57,14 @@ class BillingCycleTest {
 
     @Test
     fun `上一个周期跨年`() {
+        // 2026-01-05 处于 2025-12-15~2026-01-14 这一期，上一期应是 2025-11-15~2025-12-14
+        val current = BillingCycleCalculator.of(d("2026-01-05"), 15)
+        assertEquals("2025-12-15", current.start.toString())
+        assertEquals("2026-01-14", current.end.toString())
+
         val prev = BillingCycleCalculator.previous(d("2026-01-05"), 15)
-        assertEquals("2025-12-15", prev.start.toString())
-        assertEquals("2026-01-14", prev.end.toString())
+        assertEquals("2025-11-15", prev.start.toString())
+        assertEquals("2025-12-14", prev.end.toString())
     }
 
     @Test
