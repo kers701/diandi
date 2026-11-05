@@ -831,9 +831,9 @@ private fun HomeCategoryChart(
     val entries = remember(stats) {
         val top = stats.take(5)
         val remainder = stats.drop(5).sumOf { it.total }
-        if (remainder > 0.0) top + CategoryStat("其他", remainder) else top
+        if (remainder > 0L) top + CategoryStat("其他", remainder) else top
     }
-    val total = entries.sumOf { it.total }.coerceAtLeast(0.0001)
+    val totalCents = entries.sumOf { it.total }.coerceAtLeast(1L)
 
     Card(
         modifier = modifier,
@@ -869,7 +869,7 @@ private fun HomeCategoryChart(
                         val top = (size.height - diameter) / 2f
                         var startAngle = -90f
                         entries.forEachIndexed { index, entry ->
-                            val sweep = (entry.total / total * 360.0).toFloat()
+                            val sweep = (entry.total.toDouble() / totalCents.toDouble() * 360.0).toFloat()
                             drawArc(
                                 color = HOME_CATEGORY_COLORS[index % HOME_CATEGORY_COLORS.size],
                                 startAngle = startAngle,
@@ -888,7 +888,7 @@ private fun HomeCategoryChart(
                     ) {
                         entries.forEachIndexed { index, entry ->
                             val color = HOME_CATEGORY_COLORS[index % HOME_CATEGORY_COLORS.size]
-                            val fraction = (entry.total / total).toFloat().coerceIn(0f, 1f)
+                            val fraction = (entry.total.toDouble() / totalCents.toDouble()).toFloat().coerceIn(0f, 1f)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
@@ -1136,7 +1136,7 @@ fun TransactionItem(
                         )
                     }
                     Text(
-                        "$sign${"%.2f".format(tx.amount)}",
+                        "$sign${formatMoney(tx.amountCents)}",
                         color = amountColor,
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp

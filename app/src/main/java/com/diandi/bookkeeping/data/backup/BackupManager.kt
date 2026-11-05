@@ -176,10 +176,8 @@ object BackupManager {
                 val allocationWeight = item.optDouble("allocationWeight", 1.0).also {
                     require(it.isFinite() && it in 0.01..1000.0) { "目标分配权重无效。" }
                 }
-                val lastManualDepositCents = item.optCents("lastManualDepositCents", "lastManualDeposit") ?: 0L
-                lastManualDepositCents.also {
-                    require(it.isFinite() && it >= 0.0) { "最近存入金额无效。" }
-                }
+                val lastManualDepositCents = (item.optCents("lastManualDepositCents", "lastManualDeposit") ?: 0L)
+                    .also { require(it >= 0L) { "最近存入金额无效。" } }
                 SavingsGoal(
                     id = id,
                     title = title,

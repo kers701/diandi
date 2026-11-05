@@ -201,8 +201,8 @@ fun GoalsScreen(
 fun GoalCard(
     goal: SavingsGoal,
     allocatedCents: Long,
-    onAddProgress: (Double) -> Unit,
-    onReduceProgress: (Double) -> Unit,
+    onAddProgress: (Long) -> Unit,
+    onReduceProgress: (Long) -> Unit,
     onUndoProgress: () -> Unit,
     onResetProgress: () -> Unit,
     onEdit: () -> Unit,
@@ -303,7 +303,7 @@ fun GoalCard(
                             onClick = { manualCents?.let { onReduceProgress(it); amountText = "" } }
                         ) { Text("降低") }
                         TextButton(
-                            enabled = goal.lastManualDeposit > 0.0,
+                            enabled = goal.lastManualDepositCents > 0L,
                             onClick = onUndoProgress
                         ) { Text("撤销") }
                         TextButton(
@@ -311,7 +311,7 @@ fun GoalCard(
                             onClick = onResetProgress
                         ) { Text("重置") }
                     }
-                    if (goal.lastManualDeposit > 0.0) {
+                    if (goal.lastManualDepositCents > 0L) {
                         Text(
                             "最近存入 ${formatMoney(goal.lastManualDepositCents)} 可撤销",
                             style = MaterialTheme.typography.labelSmall,

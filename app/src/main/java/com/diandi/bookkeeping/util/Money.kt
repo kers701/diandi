@@ -46,7 +46,7 @@ object Money {
         else BigDecimal.valueOf(amount)
             .setScale(2, RoundingMode.HALF_UP)
             .movePointRight(2)
-            .longValue()
+            .toLong()
 
     /** 分 → 元（只在图表坐标等需要 Double 的地方使用）。 */
     fun toYuan(cents: Long): Double = cents / 100.0
