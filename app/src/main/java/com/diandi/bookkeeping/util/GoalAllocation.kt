@@ -4,52 +4,78 @@ import com.diandi.bookkeeping.data.entity.SavingsGoal
 import kotlin.math.floor
 
 /**
- * 按各目标权重分配当前正余额；负余额不参与分配，异常权重按 1 处理。
+ * 按各目标权重分配当前正余额。
  *
- * 输入输出一律为「分」，并保证 **各目标分配额之和恰好等于可分配余额**
- * （按小数部分从大到小补足余数），不会因为四舍五入凭空多出或少掉几分钱。
+ * **关键规则：每个目标只分配到「还差多少到目标」为止。**
+ * 进度满 100% 的目标不再参与分配，剩余的钱继续按权重分给还没满的目标；
+ * 所有目标都满时，多出来的余额不再分配（留作可自由支配）。
+ *
+ * 输入输出一律为「分」；同一轮内按小数部分从大到小补足余数，
+ * 不会因为四舍五入凭空多出或少掉几分钱。负余额不参与分配，异常权重按 1 处理。
  */
 fun allocateBalanceByWeight(balanceCents: Long, goals: List<SavingsGoal>): Map<Long, Long> {
     if (goals.isEmpty()) return emptyMap()
-    val distributable = balanceCents.coerceAtLeast(0L)
-    val weights = goals.map { goal ->
-        goal.allocationWeight.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
-    }
-    val totalWeight = weights.sum()
-    if (!totalWeight.isFinite() || totalWeight <= 0.0) {
-        return distributeEvenly(distributable, goals)
-    }
-    val raw = goals.indices.map { index ->
-        distributable.toDouble() * weights[index] / totalWeight
-    }
-    val shares = raw.map { floor(it).toLong() }.toMutableList()
-    var remainder = distributable - shares.sum()
-    if (remainder > 0L) {
-        // 小数部分越大的越先补 1 分，保证总额精确
-        val order = raw.indices.sortedByDescending { raw[it] - floor(raw[it]) }
-        var i = 0
-        while (remainder > 0L && order.isNotEmpty()) {
-            shares[order[i % order.size]] += 1L
-            remainder -= 1L
-            i++
-        }
-    }
-    return goals.mapIndexed { index, goal -> goal.id to shares[index] }.toMap()
-}
 
-/** 平均分配；除不尽的余数依次补给前面的目标 */
-private fun distributeEvenly(totalCents: Long, goals: List<SavingsGoal>): Map<Long, Long> {
-    val count = goals.size
-    if (count == 0) return emptyMap()
-    val base = totalCents / count
-    var remainder = totalCents % count
-    return goals.associate { goal ->
-        val extra = if (remainder > 0L) {
-            remainder -= 1L
-            1L
-        } else {
-            0L
-        }
-        goal.id to base + extra
+    val result = LinkedHashMap<Long, Long>()
+    goals.forEach { result[it.id] = 0L }
+
+    var pool = balanceCents.coerceAtLeast(0L)
+    if (pool == 0L) return result
+
+    // 每个目标还差多少才到 100%
+    val need = goals.associate { goal ->
+        goal.id to (goal.targetAmountCents - goal.currentAmountCents).coerceAtLeast(0L)
     }
+    val active = goals.filter { (need[it.id] ?: 0L) > 0L }.toMutableList()
+
+    while (pool > 0L && active.isNotEmpty()) {
+        val weights = active.map { goal ->
+            goal.allocationWeight.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
+        }
+        val totalWeight = weights.sum().takeIf { it.isFinite() && it > 0.0 }
+        val raw = active.mapIndexed { index, _ ->
+            if (totalWeight != null) {
+                pool.toDouble() * weights[index] / totalWeight
+            } else {
+                pool.toDouble() / active.size
+            }
+        }
+
+        // 本轮会有目标被「补满」：先给它们补到上限，剩下的钱下轮再分
+        val cappedIndices = active.indices.filter { index ->
+            raw[index] >= (need[active[index].id] ?: 0L).toDouble()
+        }
+        if (cappedIndices.isNotEmpty()) {
+            cappedIndices.forEach { index ->
+                val goal = active[index]
+                val amount = need[goal.id] ?: 0L
+                result[goal.id] = amount
+                pool -= amount
+            }
+            val remaining = active.filterIndexed { index, _ -> index !in cappedIndices }
+            if (remaining.size == active.size) break // 保险：没有进展就退出，避免死循环
+            active.clear()
+            active.addAll(remaining)
+            continue
+        }
+
+        // 都没到上限：按比例分完，余数按小数部分从大到小补
+        val shares = raw.map { floor(it).toLong() }.toMutableList()
+        var remainder = pool - shares.sum()
+        if (remainder > 0L) {
+            val order = raw.indices.sortedByDescending { raw[it] - floor(raw[it]) }
+            var i = 0
+            while (remainder > 0L && order.isNotEmpty()) {
+                shares[order[i % order.size]] += 1L
+                remainder -= 1L
+                i++
+            }
+        }
+        active.forEachIndexed { index, goal ->
+            result[goal.id] = shares[index]
+            pool -= shares[index]
+        }
+        break
+    }
+    return result
 }
